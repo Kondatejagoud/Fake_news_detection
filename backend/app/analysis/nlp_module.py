@@ -747,6 +747,52 @@ def check_claim_similarity(text: str) -> Dict:
     return {"score": score, "claim": claim}
 
 # ==========================================
+# EVIDENCE VERDICT CLASSIFIER
+# ==========================================
+def determine_evidence_verdict(claim_query: str, title: str, snippet: str) -> Tuple[str, float]:
+    title_l = title.lower()
+    snippet_l = snippet.lower()
+    combined_l = f"{title_l} {snippet_l}"
+    claim_l = claim_query.lower()
+    
+    # 1. Check for Refutation
+    refutation_keywords = [
+        "debunked", "false", "fake", "hoax", "untrue", "misleading", 
+        "incorrect", "wrong", "myth", "rumor", "conspiracy", "fabricated",
+        "unproven", "baseless", "disputed", "refuted"
+    ]
+    is_refuting = any(w in combined_l for w in refutation_keywords)
+    
+    # 2. Check for Confirmation
+    stop_words = {
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", 
+        "against", "of", "is", "was", "were", "are", "been", "has", "have", "had", "that", "this", "these", "those"
+    }
+    claim_words = [w.strip(".,!?\"'()").lower() for w in claim_l.split()]
+    claim_content_words = [w for w in claim_words if w and w not in stop_words and len(w) > 3]
+    
+    matched_words = [w for w in claim_content_words if w in combined_l]
+    
+    assertion_words = {
+        "cure", "cures", "curing", "launch", "launched", "launching", "declare", "declared", "declaring",
+        "replace", "replacing", "replaced", "deploy", "deploying", "deployed", "control", "controlling", "controlled",
+        "rigged", "rigging", "ballot", "ballots", "vote", "voting", "detect", "detected", "detecting", "find", "found",
+        "release", "released", "releasing", "dome", "glass", "billionaires", "tax", "unlawful", "presence", "rover", "martian"
+    }
+    has_assertion_match = any(w in combined_l for w in assertion_words if w in claim_words)
+    
+    overlap_ratio = len(matched_words) / len(claim_content_words) if claim_content_words else 0.0
+    
+    if is_refuting:
+        if overlap_ratio >= 0.20 or has_assertion_match:
+            return "Refuting", 0.90
+            
+    if overlap_ratio >= 0.35 or (overlap_ratio >= 0.15 and has_assertion_match):
+        return "Confirming", 0.10
+        
+    return "Neutral", 0.50
+
+# ==========================================
 # MAIN EXPORT MODULE: ANALYZE_TEXT
 # ==========================================
 def analyze_text(text: str) -> dict:
@@ -1014,10 +1060,7 @@ def analyze_text(text: str) -> dict:
                         best_cat_item = item
                         
             if best_cat_item:
-                snippet_lower = best_cat_item["snippet"].lower() + " " + best_cat_item["title"].lower()
-                is_refuting = any(w in snippet_lower for w in refutation_keywords)
-                verdict_state = "Refuting" if is_refuting else "Confirming"
-                cat_score = 0.90 if is_refuting else 0.10
+                verdict_state, cat_score = determine_evidence_verdict(claim_query, best_cat_item["title"], best_cat_item["snippet"])
                 
                 publisher_clean = clean_publisher_name(best_cat_item["url"], best_cat_item["publisher"])
                 badge, score = get_source_reliability_badge_and_score(best_cat_item["url"], publisher_clean)
@@ -1118,13 +1161,13 @@ def analyze_text(text: str) -> dict:
             f"Factual consensus established via Google Fact Check database. "
             f"Matched record reviewed by '{cat_matches['google_factcheck']['publisher']}' with verdict: {consensus_label}."
         )
-    elif len(confirming_sources) >= 2:
+    elif len(confirming_sources) >= 1:
         nlp_prob = 0.04
         factcheck_matched = True
         consensus_label = "Confirming"
         evidence_summary = (
-            f"Consensus: High Confidence True. Factual claims verified independently "
-            f"by multiple trusted sources ({', '.join(confirming_sources)}). Google Fact Check entry unavailable."
+            f"Consensus: Factual claims verified independently "
+            f"by trusted sources ({', '.join(confirming_sources)}). Google Fact Check entry unavailable."
         )
     else:
         if refuting_sources:
@@ -1136,10 +1179,26 @@ def analyze_text(text: str) -> dict:
             )
         else:
             consensus_label = "Unverified"
-            evidence_summary = (
-                "No verified public fact-check was found for this claim. "
-                "The authenticity score is based on AI analysis only. External evidence unavailable."
-            )
+            confirming_count = len([k for k, v in cat_matches.items() if v and v["verdict"] == "Confirming"])
+            refuting_count = len([k for k, v in cat_matches.items() if v and v["verdict"] == "Refuting"])
+            
+            if confirming_count == 0 and refuting_count == 0 and not google_factcheck_active:
+                if linguistic_score > 0.50:
+                    nlp_prob = max(nlp_prob, 0.75)
+                    evidence_summary = (
+                        "Warning: This claim contains highly sensational linguistic markers "
+                        "and lacks any supporting evidence from official or trusted sources. High risk of misinformation."
+                    )
+                else:
+                    evidence_summary = (
+                        "No verified public fact-check was found for this claim. "
+                        "The authenticity score is based on AI analysis only. External evidence unavailable."
+                    )
+            else:
+                evidence_summary = (
+                    "No verified public fact-check was found for this claim. "
+                    "The authenticity score is based on AI analysis only. External evidence unavailable."
+                )
 
     flagged_claims = []
     for cat, val in cat_matches.items():
@@ -1150,16 +1209,20 @@ def analyze_text(text: str) -> dict:
     why_verdict_bullets = []
     for cat, val in cat_matches.items():
         if val:
-            marker = "✓" if val["verdict"] == "Confirming" else "🚨"
-            if cat == "official_sources":
-                why_verdict_bullets.append(f"{marker} {val['publisher']} officially announced/published documentation matching the claim.")
-            elif cat == "wikipedia":
-                why_verdict_bullets.append(f"{marker} Wikipedia logs contain active records supporting this claim.")
-            elif cat == "trusted_news":
-                why_verdict_bullets.append(f"{marker} Major news agency '{val['publisher']}' published reports confirming this claim.")
-            elif cat == "google_factcheck":
-                status_v = "disputes" if val["verdict"] == "Refuting" else "verifies"
-                why_verdict_bullets.append(f"{marker} Google Fact Check reviews by '{val['publisher']}' actively {status_v} the claim.")
+            if val["verdict"] == "Neutral":
+                marker = "ℹ"
+                why_verdict_bullets.append(f"{marker} Relevant references on '{val['publisher']}' were scanned, but they do not confirm or refute the specific claim details.")
+            else:
+                marker = "✓" if val["verdict"] == "Confirming" else "🚨"
+                if cat == "official_sources":
+                    why_verdict_bullets.append(f"{marker} {val['publisher']} officially announced/published documentation matching the claim.")
+                elif cat == "wikipedia":
+                    why_verdict_bullets.append(f"{marker} Wikipedia logs contain active records supporting this claim.")
+                elif cat == "trusted_news":
+                    why_verdict_bullets.append(f"{marker} Major news agency '{val['publisher']}' published reports confirming this claim.")
+                elif cat == "google_factcheck":
+                    status_v = "disputes" if val["verdict"] == "Refuting" else "verifies"
+                    why_verdict_bullets.append(f"{marker} Google Fact Check reviews by '{val['publisher']}' actively {status_v} the claim.")
 
     if not refuting_sources and not (google_factcheck_active and cat_matches["google_factcheck"]["verdict"] == "Refuting"):
         why_verdict_bullets.append("✓ No verified fact-check contradicts this claim.")
