@@ -1,0 +1,139 @@
+[
+  {
+    "category": "True News",
+    "input": "The World Health Organization (WHO) declared that the global outbreak of Mpox represents a public health emergency of international concern.",
+    "claims": [
+      "The World Health Organization (WHO) declared that the global outbreak of Mpox represents a public health emergency of international concern."
+    ],
+    "entities": [
+      "Mpox",
+      "WHO",
+      "The World Health Organization"
+    ],
+    "verdict": "True",
+    "confidence": "61%",
+    "evidence_count": 2,
+    "evidence": [
+      "[Wikipedia] Wikipedia: World Health Organization (Reliability: 70/100, Strength: Supporting)",
+      "[Official Sources] WHO: Factual reference for 'WHO Model List of Essential Medicines' (Reliability: 20/100, Strength: Supporting)"
+    ]
+  },
+  {
+    "category": "Fake News",
+    "input": "According to anonymous online leaks, election officials in several counties were caught replacing voting machine storage drives with pre-loaded ballots.",
+    "claims": [
+      ", election officials in several counties were caught replacing voting machine storage drives with pre-loaded ballots."
+    ],
+    "entities": [],
+    "verdict": "Unverified",
+    "confidence": "48%",
+    "evidence_count": 0,
+    "evidence": []
+  },
+  {
+    "category": "Satire",
+    "input": "The Onion reports that the nation's billionaires have built a giant glass dome over the city of Geneva to protect themselves from tax investigators.",
+    "claims": [
+      "The Onion reports that the nation's billionaires have built a giant glass dome over the city of Geneva to protect themselves from tax investigators."
+    ],
+    "entities": [
+      "Geneva",
+      "The Onion"
+    ],
+    "verdict": "True",
+    "confidence": "80%",
+    "evidence_count": 3,
+    "evidence": [
+      "[Wikipedia] Wikipedia: Geneva (Reliability: 70/100, Strength: Supporting)",
+      "[Official Sources] Id: Factual reference for 'Geneva Carr' (Reliability: 100/100, Strength: Supporting)",
+      "[Trusted News] The Guardian: Factual reference for 'Joe Biden (The Onion)' (Reliability: 85/100, Strength: Supporting)"
+    ]
+  },
+  {
+    "category": "Conspiracy",
+    "input": "Leaked documents show that cellular companies are working under contract for governments to deploy mind-control arrays in 5G mobile towers.",
+    "claims": [
+      "Leaked documents show that cellular companies are working under contract for governments to deploy mind-control arrays in 5G mobile towers."
+    ],
+    "entities": [],
+    "verdict": "Unverified",
+    "confidence": "48%",
+    "evidence_count": 0,
+    "evidence": []
+  },
+  {
+    "category": "Medical Misinformation",
+    "input": "Medical researchers at the fictional Institute of Science claim that drinking hot lemon water thrice daily cures terminal cancer completely.",
+    "claims": [
+      "drinking hot lemon water thrice daily cures terminal cancer completely."
+    ],
+    "entities": [
+      "Medical",
+      "Institute",
+      "Science"
+    ],
+    "verdict": "Unverified",
+    "confidence": "48%",
+    "evidence_count": 0,
+    "evidence": []
+  },
+  {
+    "category": "Technology News",
+    "input": "OpenAI announced the release of GPT-4o, a new flagship AI model capable of reasoning across text, audio, and video in real-time.",
+    "claims": [
+      "OpenAI announced the release of GPT-4o, a new flagship AI model capable of reasoning across text, audio, and video in real-time."
+    ],
+    "entities": [
+      "OpenAI",
+      "GPT-4o"
+    ],
+    "verdict": "True",
+    "confidence": "78%",
+    "evidence_count": 2,
+    "evidence": [
+      "[Wikipedia] Wikipedia: OpenAI (Reliability: 70/100, Strength: Supporting)",
+      "[Trusted News] Bloomberg: Factual reference for 'GPT-4o' (Reliability: 85/100, Strength: Supporting)"
+    ]
+  },
+  {
+    "category": "Political News",
+    "input": "The United Nations General Assembly voted overwhelmingly to demand that Israel end its unlawful presence in the occupied Palestinian territories.",
+    "claims": [
+      "The United Nations General Assembly voted overwhelmingly to demand that Israel end its unlawful presence in the occupied Palestinian territories."
+    ],
+    "entities": [
+      "Palestinian",
+      "The United Nations General Assembly",
+      "Israel"
+    ],
+    "verdict": "True",
+    "confidence": "80%",
+    "evidence_count": 3,
+    "evidence": [
+      "[Wikipedia] Wikipedia: United Nations General Assembly (Reliability: 70/100, Strength: Supporting)",
+      "[Official Sources] United Nations: Factual reference for 'President of the United Nations General Assembly' (Reliability: 100/100, Strength: Supporting)",
+      "[Trusted News] The New York Times: &#x27;Palestine Is Ours,&#x27; Abbas Tells U.N. General Assembly (Reliability: 85/100, Strength: Supporting)"
+    ]
+  },
+  {
+    "category": "Scientific Discoveries",
+    "input": "NASA's James Webb Space Telescope detected carbon dioxide and methane in the atmosphere of the exoplanet K2-18b, a habitable-zone sub-Neptune.",
+    "claims": [
+      "NASA's James Webb Space Telescope detected carbon dioxide and methane in the atmosphere of the exoplanet K2-18b, a habitable-zone sub-Neptune."
+    ],
+    "entities": [
+      "NASA",
+      "Neptune",
+      "K2-18b",
+      "James Webb Space Telescope"
+    ],
+    "verdict": "True",
+    "confidence": "85%",
+    "evidence_count": 3,
+    "evidence": [
+      "[Wikipedia] Wikipedia: NASA (Reliability: 100/100, Strength: Supporting)",
+      "[Official Sources] NASA: Factual reference for 'Neptune' (Reliability: 100/100, Strength: Supporting)",
+      "[Trusted News] The New York Times: Factual reference for 'Neptune Odyssey' (Reliability: 100/100, Strength: Supporting)"
+    ]
+  }
+]

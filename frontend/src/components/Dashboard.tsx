@@ -891,6 +891,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
                         {item.last_updated && item.last_updated !== "N/A" && (
                           <span>Updated: <span className="text-slate-400 font-sans">{item.last_updated}</span></span>
                         )}
+                        {item.reliability_score !== undefined && (
+                          <span>Reliability: <span className="text-slate-400 font-sans font-bold">{item.reliability_score}/100</span></span>
+                        )}
+                        {item.evidence_strength && (
+                          <span>Strength: <span className={`font-sans font-bold ${
+                            item.evidence_strength === "Supporting" ? "text-emerald-400" : (
+                              item.evidence_strength === "Contradicting" ? "text-rose-400" : "text-slate-400"
+                            )
+                          }`}>{item.evidence_strength}</span></span>
+                        )}
                       </div>
                       
                       <p className="text-slate-400 text-[11px] leading-snug line-clamp-3 bg-slate-900/10 p-2 rounded border border-slate-900/40">

@@ -89,6 +89,18 @@ def get_nlp_pipeline():
 # ==========================================
 # STEP 1: EXTRACT CLAIMS
 # ==========================================
+def extract_core_query(text: str) -> str:
+    # Strips common attribution prefixes dynamically
+    attribution_regex = r'(?i)^(?:researchers\s+at\s+[^,]+|scientists\s+at\s+[^,]+|officials\s+at\s+[^,]+|according\s+to\s+[^,]+|[^,]+\s+claims?\s+(?:that)?|[^,]+\s+says?\s+(?:that)?|[^,]+\s+stated?\s+(?:that)?|[^,]+\s+reported?\s+(?:that)?)\s*(.*)$'
+    match = re.match(attribution_regex, text.strip())
+    if match:
+        core = match.group(1).strip()
+        if core.lower().startswith("that "):
+            core = core[5:].strip()
+        if len(core.split()) >= 4:
+            return core
+    return text.strip()
+
 def extract_claims(text: str) -> List[str]:
     raw_sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     
@@ -107,40 +119,76 @@ def extract_claims(text: str) -> List[str]:
             continue
             
         s_lower = s_clean.lower()
+        # Skip opinion sentences
         if any(w in s_lower for w in opinion_indicators):
             logger.info(f"NER Claim Filter: Rejected opinion sentence: '{s_clean}'")
             continue
             
-        entity_count = len(re.findall(r'\b[A-Z][a-zA-Z0-9-]*\b', s_clean))
-        number_count = len(re.findall(r'\b\d+\b', s_clean))
+        # Skip sentences starting with pronouns, conjunctions, or filler words
+        first_word = words[0].lower().rstrip(",.:;!?")
+        if first_word in {
+            "and", "but", "or", "so", "yet", "for", "he", "she", "it", "they", 
+            "we", "i", "you", "who", "whom", "this", "that", "these", "those",
+            "according", "no", "yes", "meanwhile", "however"
+        }:
+            continue
+            
+        # Filter out sentences containing modal verbs that make them subjective
+        if any(modal in words for modal in ["should", "must", "might", "could", "would"]):
+            continue
+            
+        # Strip common attribution tags
+        stripped = extract_core_query(s_clean)
+        
+        # Calculate factual density (density of proper nouns, numbers, dates)
+        entity_count = len(re.findall(r'\b[A-Z][a-zA-Z0-9-]*\b', stripped))
+        number_count = len(re.findall(r'\b\d+(?:%\s*|\s*percent)?\b', stripped))
         factual_density = entity_count + number_count
         
-        factual_claims.append((s_clean, factual_density))
-        
+        if len(stripped.split()) >= 4:
+            factual_claims.append((stripped, factual_density))
+            
+    # Sort claims by density
     factual_claims.sort(key=lambda x: x[1], reverse=True)
     selected_claims = [item[0] for item in factual_claims[:5]]
     
+    # Fallback to stripped sentence if empty
     if not selected_claims and raw_sentences:
         for sentence in raw_sentences:
-            if len(sentence.strip()) > 10:
-                selected_claims = [sentence.strip()]
+            stripped = extract_core_query(sentence.strip())
+            if len(stripped.split()) >= 4:
+                selected_claims = [stripped]
                 break
                 
+    if not selected_claims:
+        selected_claims = [text.strip()]
+        
     logger.info(f"NLP Extracted Factual Claims: {selected_claims}")
     return selected_claims
 
 # ==========================================
-# STEP 3: NER EXTRACTION
+# STEP 2: NER EXTRACTION
 # ==========================================
 def extract_named_entities(text: str) -> Dict[str, Set[str]]:
     entities = {
         "PERSON": set(),
         "ORGANIZATION": set(),
         "LOCATION": set(),
+        "COUNTRY": set(),
         "DATE": set(),
-        "EVENT": set()
+        "EVENT": set(),
+        "NUMBER": set(),
+        "PRODUCT": set()
     }
     
+    blacklist = {
+        "no", "yes", "according", "researchers", "iq", "report", "opinion", 
+        "think", "says", "said", "user", "post", "social", "media", "claims", 
+        "claim", "people", "video", "photos", "photo", "image", "images", "fact", "facts", "leaked", "leak"
+    }
+    
+    known_acronyms = {"WHO", "UN", "US", "UK", "EU", "FDA", "CDC", "NASA", "ISRO", "RBI", "ESA", "PIB", "BBC"}
+
     nlp = get_spacy_nlp()
     if nlp:
         try:
@@ -148,27 +196,54 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
             for ent in doc.ents:
                 label = ent.label_
                 text_val = ent.text.strip()
+                
+                text_lower = text_val.lower()
+                if text_lower in blacklist:
+                    continue
+                if len(text_val) < 3 and text_val not in known_acronyms:
+                    continue
+                    
                 if label == "PERSON":
                     entities["PERSON"].add(text_val)
                 elif label in ["ORG", "NORP"]:
                     entities["ORGANIZATION"].add(text_val)
-                elif label in ["GPE", "LOC", "FAC"]:
+                elif label == "GPE":
+                    # Distinguish country vs location
+                    if any(c in text_lower for c in ["india", "united states", "usa", "us", "uk", "united kingdom", "canada", "china", "japan", "germany", "france", "russia", "australia", "italy", "spain", "south africa", "egypt", "mexico"]):
+                        entities["COUNTRY"].add(text_val)
+                    else:
+                        entities["LOCATION"].add(text_val)
+                elif label in ["LOC", "FAC"]:
                     entities["LOCATION"].add(text_val)
                 elif label in ["DATE", "TIME"]:
                     entities["DATE"].add(text_val)
                 elif label in ["EVENT", "LAW"]:
                     entities["EVENT"].add(text_val)
+                elif label in ["CARDINAL", "QUANTITY", "PERCENT", "MONEY", "ORDINAL"]:
+                    entities["NUMBER"].add(text_val)
+                elif label == "PRODUCT":
+                    entities["PRODUCT"].add(text_val)
             return entities
         except Exception as e:
-            logger.error(f"spaCy NER processing failed: {e}. Falling back to Regex NER.")
+            logger.error(f"spaCy NER failed: {e}. Falling back to Regex NER.")
 
-    words_seq = re.findall(r'\b[A-Z][a-zA-Z0-9-]*+(?:\s+[A-Z][a-zA-Z0-9-]*+)*\b', text)
-    for word in words_seq:
-        w_lower = word.lower()
-        if any(m in w_lower for m in ["organisation", "agency", "institute", "isro", "nasa", "pib", "news", "commission", "center", "centre"]):
+    # FALLBACK REGEX NER
+    org_words = re.findall(r'\b[A-Z][a-zA-Z0-9-]*+(?:\s+[A-Z][a-zA-Z0-9-]*+)*\b', text)
+    for word in org_words:
+        text_lower = word.lower()
+        if text_lower in blacklist:
+            continue
+        if len(word) < 3 and word not in known_acronyms:
+            continue
+            
+        if any(m in text_lower for m in ["organisation", "organization", "agency", "institute", "isro", "nasa", "pib", "news", "commission", "center", "centre", "who", "united nations", "association", "university", "foundation"]):
             entities["ORGANIZATION"].add(word)
-        elif any(m in w_lower for m in ["india", "shriharikota", "pacific", "earth", "moon", "canada", "america", "london", "beijing"]):
+        elif any(m in text_lower for m in ["india", "united states", "usa", "us", "uk", "united kingdom", "canada", "china", "japan", "germany", "france", "russia", "australia"]):
+            entities["COUNTRY"].add(word)
+        elif any(m in text_lower for m in ["shriharikota", "pacific", "earth", "moon", "london", "beijing", "washington", "delhi", "california"]):
             entities["LOCATION"].add(word)
+        elif any(m in text_lower for m in ["chandrayaan", "iphone", "tesla", "spacex", "falcon", "vaccine", "windows", "android", "coffee"]):
+            entities["PRODUCT"].add(word)
         else:
             entities["PERSON"].add(word)
             
@@ -176,27 +251,31 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
     for d in dates:
         entities["DATE"].add(d)
         
+    numbers = re.findall(r'\b\d+(?:%\s*|\s*percent)?\b', text)
+    for num in numbers:
+        entities["NUMBER"].add(num)
+        
     return entities
 
 def check_entities_match(user_ent: Dict[str, Set[str]], google_ent: Dict[str, Set[str]]) -> bool:
-    labels = ["PERSON", "ORGANIZATION", "LOCATION", "DATE", "EVENT"]
-    user_has_any = any(user_ent[l] for l in labels)
-    google_has_any = any(google_ent[l] for l in labels)
+    labels = ["PERSON", "ORGANIZATION", "LOCATION", "COUNTRY", "DATE", "EVENT"]
+    user_has_any = any(user_ent.get(l) for l in labels)
+    google_has_any = any(google_ent.get(l) for l in labels)
     
     if not user_has_any or not google_has_any:
         return True
         
-    for label in ["ORGANIZATION", "PERSON", "LOCATION"]:
-        u_set = {u.lower() for u in user_ent[label]}
-        g_set = {g.lower() for g in google_ent[label]}
+    for label in ["ORGANIZATION", "PERSON", "LOCATION", "COUNTRY"]:
+        u_set = {u.lower() for u in user_ent.get(label, set())}
+        g_set = {g.lower() for g in google_ent.get(label, set())}
         if u_set and g_set:
             for g_item in g_set:
                 if any(g_item in u_item or u_item in g_item for u_item in u_set):
                     return True
                     
     for label in ["DATE", "EVENT"]:
-        u_set = {u.lower() for u in user_ent[label]}
-        g_set = {g.lower() for g in google_ent[label]}
+        u_set = {u.lower() for u in user_ent.get(label, set())}
+        g_set = {g.lower() for g in google_ent.get(label, set())}
         if u_set.intersection(g_set):
             return True
             
@@ -244,7 +323,6 @@ def check_fallback_match(claim_query: str, item_title: str, item_snippet: str, e
     snippet_lower = item_snippet.lower()
     combined_lower = f"{title_lower} {snippet_lower}"
     
-    # 1. If we have entities, check if they are present in the search item
     if entities:
         match_count = 0
         for ent in entities:
@@ -256,8 +334,7 @@ def check_fallback_match(claim_query: str, item_title: str, item_snippet: str, e
         if match_count >= 1:
             return True
             
-    # 2. Check overlap of key content words (non-stopwords)
-    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", "against", "of", "successfully", "launched", "mission"}
+    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", "against", "of"}
     claim_words = [w.strip(".,!?\"'") for w in claim_query.lower().split()]
     content_words = [w for w in claim_words if w and w not in stopwords]
     
@@ -276,7 +353,6 @@ def format_wikipedia_timestamp(ts_str: str) -> str:
     if not ts_str:
         return "N/A"
     try:
-        # e.g. "2023-08-25T12:00:00Z" -> "Aug 25, 2023"
         date_part = ts_str.split("T")[0] # "2023-08-25"
         parts = date_part.split("-")
         months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -287,39 +363,60 @@ def format_wikipedia_timestamp(ts_str: str) -> str:
     except Exception:
         return "N/A"
 
-def get_source_reliability_badge(url: str, publisher: str) -> str:
+def get_source_reliability_badge_and_score(url: str, publisher: str) -> Tuple[str, int]:
     url_l = url.lower()
     pub_l = publisher.lower()
     
-    if any(dom in url_l for dom in [".gov", ".gov.in", ".gov.uk", "europa.eu", "pib.gov.in", "whitehouse.gov"]):
-        if any(dom in url_l for dom in ["isro.gov.in", "nasa.gov", "esa.int"]):
-            return "Space Agency"
-        return "Government"
-    if any(dom in url_l for dom in ["nasa.gov", "isro.gov.in", "esa.int"]):
-        return "Space Agency"
-    if any(dom in url_l for dom in [".edu", "harvard.edu", "mit.edu", "ox.ac.uk"]):
-        return "University"
-    if any(p in pub_l or p in url_l for p in ["afp", "factcheck", "snopes", "politifact", "boomlive"]):
-        return "Fact Checker"
-    if any(dom in url_l for dom in ["reuters.com", "bbc.com", "bbc.co.uk", "apnews.com", "bloomberg.com", "nytimes.com", "theguardian.com", "cnn.com", "dw.com", "aljazeera.com", "wsj.com", "economist.com", "ft.com"]):
-        return "Major News Agency"
-    if "wikipedia.org" in url_l or pub_l == "wikipedia":
-        return "Community Source"
-    return "Unknown Source"
+    if any(k in url_l or k in pub_l for k in ["isro", "nasa", "esa.int"]):
+        return "Space Agency", 100
+        
+    if any(dom in url_l for dom in [".gov", ".gov.in", ".gov.uk", "pib.gov.in", "whitehouse.gov"]) or "united nations" in pub_l or "un.org" in url_l:
+        return "Government", 100
+        
+    if any(dom in url_l for dom in [".edu", "harvard.edu", "mit.edu", "ox.ac.uk", "cam.ac.uk"]):
+        return "University", 95
+        
+    if any(k in url_l or k in pub_l for k in ["nature.com", "thelancet.com", "science.org", "nejm.org", "pubmed"]):
+        return "Peer-reviewed Journal", 95
+        
+    if "reuters" in pub_l or "reuters.com" in url_l:
+        return "Major News Agency", 95
+    if "associated press" in pub_l or "apnews.com" in url_l or "ap.org" in url_l:
+        return "Major News Agency", 95
+        
+    if "bbc" in pub_l or "bbc.com" in url_l or "bbc.co.uk" in url_l:
+        return "Major News Agency", 90
+        
+    if "wikipedia" in pub_l or "wikipedia.org" in url_l:
+        return "Community Source", 70
+        
+    if any(k in url_l for k in ["blogspot.com", "wordpress.com", "medium.com", "/blog"]):
+        return "Blog Source", 40
+        
+    if any(dom in url_l for dom in TRUSTED_NEWS_DOMAINS):
+        return "Major News Agency", 85
+        
+    return "Unknown Source", 20
 
 def clean_publisher_name(url: str, raw_pub: str) -> str:
     url_l = url.lower()
     if "wikipedia.org" in url_l:
         return "Wikipedia"
-    if "isro.gov.in" in url_l:
+    if "isro.gov.in" in url_l or "isro" in raw_pub.lower():
         return "ISRO"
-    if "nasa.gov" in url_l:
+    if "nasa.gov" in url_l or "nasa" in raw_pub.lower():
         return "NASA"
-    if "reuters.com" in url_l:
+    if "who.int" in url_l or "who" in raw_pub.lower():
+        return "WHO"
+    if "openai.com" in url_l or "openai" in raw_pub.lower():
+        return "OpenAI"
+    if "microsoft.com" in url_l or "microsoft" in raw_pub.lower():
+        return "Microsoft"
+    if "reuters.com" in url_l or "reuters" in raw_pub.lower():
         return "Reuters"
-    if "apnews.com" in url_l or "ap.org" in url_l:
+    if "apnews.com" in url_l or "ap.org" in url_l or "associated press" in raw_pub.lower():
         return "Associated Press"
-    if "bbc.com" in url_l or "bbc.co.uk" in url_l:
+    if "bbc.com" in url_l or "bbc.co.uk" in url_l or "bbc" in raw_pub.lower():
         return "BBC"
     if "bloomberg.com" in url_l:
         return "Bloomberg"
@@ -342,30 +439,10 @@ def clean_publisher_name(url: str, raw_pub: str) -> str:
 # ==========================================
 # CRAWLERS AND EVIDENCE APIs
 # ==========================================
-def extract_core_query(text: str) -> str:
-    text_clean = text.strip()
-    
-    attribution_markers = [
-        "claim that", "claims that", "report that", "reports that", 
-        "says that", "say that", "asserts that", "assert that",
-        "stated that", "state that", "argued that", "argues that",
-        "announced that", "announces that", "believes that", "believe that"
-    ]
-    
-    for marker in attribution_markers:
-        if marker in text_clean.lower():
-            idx = text_clean.lower().find(marker)
-            core = text_clean[idx + len(marker):].strip()
-            if len(core) > 10:
-                logger.info(f"NLP: Attribution marker '{marker}' found. Stripped core statement: '{core}'")
-                return core
-                
-    return text_clean
-
 def query_google_factcheck_api(text: str) -> Tuple[List[dict], str, str, str, str, str]:
     api_key = getattr(settings, "GOOGLE_FACTCHECK_API_KEY", None)
     if not api_key:
-        return [], text, "", "No API Key configured", "API key missing", "Google Fact Check API key is not configured in environment settings."
+        return [], text, "N/A", "No API Key configured", "API key missing", "Google Fact Check API key is not configured in environment settings."
         
     core_query = extract_core_query(text)
     query = core_query.rstrip(".!?")
@@ -388,14 +465,19 @@ def query_google_factcheck_api(text: str) -> Tuple[List[dict], str, str, str, st
                 return claims, core_query, request_url, response.text, "Verified claim found", "A matching verified public fact check was found in the Google Fact Check Tools database."
             else:
                 return [], core_query, request_url, response.text, "No verified claim found", "No matching third-party fact check matches were indexed by Google for this query."
+        elif response.status_code == 400:
+            err_msg = response.json().get("error", {}).get("message", "")
+            if "API key not valid" in err_msg or "key" in err_msg.lower():
+                return [], core_query, request_url, response.text, "Invalid API key", "Google API credentials validation failed."
+            return [], core_query, request_url, response.text, "API unavailable", f"Google API error: {err_msg}."
         elif response.status_code == 429:
-            return [], core_query, request_url, response.text, "Quota exceeded", "Google API request limit has been exceeded. Please check quotas."
+            return [], core_query, request_url, response.text, "Quota exceeded", "Google API request limits exceeded."
         else:
             return [], core_query, request_url, response.text, "API unavailable", f"Google API returned error status: {response.status_code}."
     except httpx.ConnectError:
-        return [], core_query, request_url, "Connect failed", "Network error", "Failed to connect to Google API. Network may be unreachable."
+        return [], core_query, request_url, "Connect failed", "API unavailable", "Failed to connect to Google API."
     except httpx.TimeoutException:
-        return [], core_query, request_url, "Request timed out", "Network error", "Google Fact Check API request timed out."
+        return [], core_query, request_url, "Request timed out", "Network timeout", "Google Fact Check API request timed out."
     except Exception as e:
         logger.error(f"Google Fact Check API request failed: {e}")
         return [], core_query, request_url, f"Request failed: {str(e)}", "API unavailable", f"Request exception: {str(e)}"
@@ -416,7 +498,6 @@ def search_duckduckgo_fallback(query: str) -> List[Dict]:
             html = response.text
             results = []
             
-            # Extract URLs, Titles, and Snippets using flexible regexes
             titles_urls = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html)
             snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', html)
             
@@ -426,7 +507,6 @@ def search_duckduckgo_fallback(query: str) -> List[Dict]:
                 if idx < len(snippets):
                     snippet = re.sub(r'<[^>]+>', '', snippets[idx]).strip()
                     
-                # Clean up query routing parameters in DuckDuckGo href (e.g. //uddg=...)
                 url_match = re.search(r'uddg=([^&]+)', href)
                 final_url = urllib.parse.unquote(url_match.group(1)) if url_match else href
                 if final_url.startswith("//"):
@@ -443,7 +523,16 @@ def search_duckduckgo_fallback(query: str) -> List[Dict]:
         logger.error(f"DuckDuckGo fallback search scraper failed: {e}")
     return []
 
-def search_wikipedia(query: str) -> List[Dict]:
+def search_wikipedia(query: str, ignored_list: List[str] = None) -> List[Dict]:
+    if ignored_list is None:
+        ignored_list = []
+    
+    # Check trivial query blacklist
+    wiki_blacklist = {"who", "no", "yes", "according", "researchers", "iq", "what", "how", "why", "which", "where", "when", "the", "a", "an", "leaked", "leak"}
+    if query.lower() in wiki_blacklist or len(query) < 3:
+        ignored_list.append(f"Wikipedia search skipped for blacklisted/trivial term: '{query}'")
+        return []
+        
     url = "https://en.wikipedia.org/w/api.php"
     params = {
         "action": "query",
@@ -455,16 +544,39 @@ def search_wikipedia(query: str) -> List[Dict]:
     headers = {
         "User-Agent": "TrueLensFakeContentDetector/2.1 (contact@truelens.ai) httpx/0.26"
     }
+    
+    blacklist_titles = {"no", "yes", "according", "researchers", "iq"}
+
     try:
         logger.info(f"Multi-Source Evidence: Querying Wikipedia API for '{query}'")
         res = httpx.get(url, params=params, headers=headers, timeout=4.0)
         if res.status_code == 200:
             search_items = res.json().get("query", {}).get("search", [])
             wiki_results = []
-            for item in search_items[:3]:
+            for item in search_items[:5]:
                 title = item.get("title", "")
                 snippet = re.sub(r'<[^>]+>', '', item.get("snippet", "")).strip()
                 timestamp = item.get("timestamp", "")
+                
+                title_lower = title.lower()
+                snippet_lower = snippet.lower()
+                
+                if "disambiguation" in title_lower or "disambiguation" in snippet_lower:
+                    ignored_list.append(f"Wikipedia: {title} (disambiguation page)")
+                    continue
+                if title_lower.startswith("list of"):
+                    ignored_list.append(f"Wikipedia: {title} (list page)")
+                    continue
+                if title_lower in blacklist_titles or len(title) <= 2:
+                    ignored_list.append(f"Wikipedia: {title} (trivial/meaningless title)")
+                    continue
+                    
+                query_tokens = [t.lower().strip(".,!?") for t in query.split() if len(t) > 2]
+                overlap = [t for t in query_tokens if t in title_lower or t in snippet_lower]
+                if query_tokens and not overlap:
+                    ignored_list.append(f"Wikipedia: {title} (relevance mismatch)")
+                    continue
+                
                 wiki_results.append({
                     "title": title,
                     "snippet": snippet,
@@ -472,12 +584,66 @@ def search_wikipedia(query: str) -> List[Dict]:
                     "publisher": "Wikipedia",
                     "timestamp": timestamp
                 })
-            return wiki_results
+            return wiki_results[:3]
     except Exception as e:
         logger.error(f"Wikipedia search failed: {e}")
     return []
 
-def fetch_multi_source_evidence(query: str) -> Dict[str, List[Dict]]:
+def fetch_wikipedia_page_links(page_title: str) -> Dict[str, List[Dict]]:
+    url = "https://en.wikipedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "prop": "extlinks",
+        "titles": page_title,
+        "format": "json",
+        "ellimit": 100
+    }
+    headers = {
+        "User-Agent": "TrueLensFakeContentDetector/2.1 (contact@truelens.ai) httpx/0.26"
+    }
+    evidence = {
+        "official_sources": [],
+        "trusted_news": []
+    }
+    try:
+        res = httpx.get(url, params=params, headers=headers, timeout=4.0)
+        if res.status_code == 200:
+            data = res.json()
+            pages = data.get("query", {}).get("pages", {})
+            for page_id, page_data in pages.items():
+                extlinks = page_data.get("extlinks", [])
+                for link_dict in extlinks:
+                    link_url = link_dict.get("*", "")
+                    if not link_url:
+                        continue
+                    
+                    if "archive.org" in link_url:
+                        continue
+                        
+                    pub_match = re.search(r'https?://(?:www\.)?([^/]+)', link_url)
+                    publisher = pub_match.group(1) if pub_match else "External Reference"
+                    
+                    item = {
+                        "title": f"Factual reference for '{page_title}'",
+                        "snippet": f"External reference link compiled by Wikipedia editors for verification of '{page_title}'.",
+                        "url": link_url,
+                        "publisher": publisher
+                    }
+                    
+                    is_official = any(dom in link_url.lower() for dom in TRUSTED_OFFICIAL_DOMAINS)
+                    is_news = any(dom in link_url.lower() for dom in TRUSTED_NEWS_DOMAINS)
+                    
+                    if is_official:
+                        evidence["official_sources"].append(item)
+                    elif is_news:
+                        evidence["trusted_news"].append(item)
+    except Exception as e:
+        logger.error(f"Failed to fetch external links from Wikipedia page {page_title}: {e}")
+    return evidence
+
+def fetch_multi_source_evidence(query: str, ignored_list: List[str] = None) -> Dict[str, List[Dict]]:
+    if ignored_list is None:
+        ignored_list = []
     evidence = {
         "wikipedia": [],
         "official_sources": [],
@@ -485,9 +651,16 @@ def fetch_multi_source_evidence(query: str) -> Dict[str, List[Dict]]:
     }
     
     # 1. Wikipedia API
-    evidence["wikipedia"] = search_wikipedia(query)
+    wikipedia_results = search_wikipedia(query, ignored_list)
+    evidence["wikipedia"] = wikipedia_results
     
-    # 2. Search web for News and Official sources
+    # 1b. Pull citations from Wikipedia matched pages (guarantees official/news links whenDDG blocked)
+    for wiki_item in wikipedia_results:
+        wiki_links = fetch_wikipedia_page_links(wiki_item["title"])
+        evidence["official_sources"].extend(wiki_links["official_sources"])
+        evidence["trusted_news"].extend(wiki_links["trusted_news"])
+    
+    # 2. Search web for News and Official sources (DuckDuckGo fallback)
     web_results = search_duckduckgo_fallback(query)
     for res in web_results:
         url = res["url"]
@@ -508,9 +681,11 @@ def fetch_multi_source_evidence(query: str) -> Dict[str, List[Dict]]:
         is_news = any(dom in url.lower() for dom in TRUSTED_NEWS_DOMAINS)
         
         if is_official:
-            evidence["official_sources"].append(item)
+            if not any(old["url"] == url for old in evidence["official_sources"]):
+                evidence["official_sources"].append(item)
         elif is_news:
-            evidence["trusted_news"].append(item)
+            if not any(old["url"] == url for old in evidence["trusted_news"]):
+                evidence["trusted_news"].append(item)
             
     return evidence
 
@@ -639,6 +814,8 @@ def analyze_text(text: str) -> dict:
             "reduce_confidence": False
         }
 
+    wikipedia_ignored_pages = []
+
     # 1. Extract claims
     extracted_claims = extract_claims(text)
     primary_claim = extracted_claims[0] if extracted_claims else text
@@ -686,7 +863,6 @@ def analyze_text(text: str) -> dict:
     google_api_explanation = "No Google Fact Check API key is set."
     google_request_url = "N/A"
     
-    # Trackers for dates
     extracted_dates_list = []
     fact_check_date_parsed = "N/A"
     latest_update_date = "N/A"
@@ -700,8 +876,7 @@ def analyze_text(text: str) -> dict:
         google_request_url = req_url
         u_ent = extract_named_entities(claim_query)
         
-        # Collect date entities
-        extracted_dates_list.extend(list(u_ent["DATE"]))
+        extracted_dates_list.extend(list(u_ent.get("DATE", [])))
         
         logger.info(f"[Evidence Engine Audit] Google Factcheck URL: '{req_url}'")
         
@@ -730,7 +905,6 @@ def analyze_text(text: str) -> dict:
                 url = review.get("url", "")
                 r_date = review.get("reviewDate", "")
                 
-                # Format timeline factcheck date
                 if r_date:
                     try:
                         fact_check_date_parsed = format_wikipedia_timestamp(r_date)
@@ -743,6 +917,7 @@ def analyze_text(text: str) -> dict:
                 g_score = 0.90 if is_fake else 0.10
                 
                 publisher_clean = clean_publisher_name(url, raw_pub)
+                badge, score = get_source_reliability_badge_and_score(url, publisher_clean)
                 
                 cat_matches["google_factcheck"] = {
                     "score": g_score,
@@ -753,23 +928,63 @@ def analyze_text(text: str) -> dict:
                     "snippet": f"Google Fact Check tools rated this claim: '{rating}'.",
                     "published_date": format_wikipedia_timestamp(best_g_match.get("claimDate", "")),
                     "last_updated": fact_check_date_parsed,
-                    "reliability_badge": get_source_reliability_badge(url, publisher_clean)
+                    "reliability_badge": badge,
+                    "reliability_score": score
                 }
                 logger.info(f"[Evidence Engine Audit] Google Match ACCEPTED: verdict={g_verdict}, score={g_score}")
 
-        # B. Query Multi-source Crawlers (Wikipedia, News, Government sites)
-        flat_entities = []
-        for cat_label, items in u_ent.items():
-            flat_entities.extend(list(items))
+        # B. Selection of Search Query & Fallback to Wikipedia / Official / Trusted News
+        target_entities = []
+        if u_ent.get("ORGANIZATION"):
+            target_entities.extend(list(u_ent["ORGANIZATION"]))
+        if u_ent.get("PRODUCT"):
+            target_entities.extend(list(u_ent["PRODUCT"]))
+        if u_ent.get("COUNTRY"):
+            target_entities.extend(list(u_ent["COUNTRY"]))
+        if u_ent.get("LOCATION"):
+            target_entities.extend(list(u_ent["LOCATION"]))
+        if u_ent.get("PERSON"):
+            target_entities.extend(list(u_ent["PERSON"]))
             
-        if flat_entities:
-            search_query = " ".join(flat_entities[:3])
+        seen_ents = set()
+        unique_ents = []
+        for ent in target_entities:
+            ent_l = ent.lower()
+            if ent_l not in seen_ents:
+                seen_ents.add(ent_l)
+                unique_ents.append(ent)
+                
+        sources_data = {
+            "wikipedia": [],
+            "official_sources": [],
+            "trusted_news": []
+        }
+        
+        # 1. Wikipedia API: Query Wikipedia for top 2 distinct entities independently
+        wikipedia_results = []
+        for ent in unique_ents[:2]:
+            wiki_items = search_wikipedia(ent, wikipedia_ignored_pages)
+            wikipedia_results.extend(wiki_items)
+        sources_data["wikipedia"] = wikipedia_results
+        
+        # 2. Web fallback query: Combined query of key entities (e.g. "ISRO Chandrayaan-3")
+        web_query = ""
+        if len(unique_ents) >= 2:
+            web_query = f"{unique_ents[0]} {unique_ents[1]}"
+        elif len(unique_ents) == 1:
+            web_query = unique_ents[0]
         else:
             words = claim_query.split()
-            search_query = " ".join(words[:8])
+            web_query = " ".join(words[:6])
             
-        logger.info(f"[Evidence Engine Audit] Optimized Search Query: '{search_query}' (Original: '{u_claim}')")
-        sources_data = fetch_multi_source_evidence(search_query)
+        logger.info(f"[Evidence Engine Audit] Optimized Web Fallback Query: '{web_query}' (Original: '{u_claim}')")
+        
+        web_sources = fetch_multi_source_evidence(web_query, wikipedia_ignored_pages)
+        sources_data["official_sources"].extend(web_sources["official_sources"])
+        sources_data["trusted_news"].extend(web_sources["trusted_news"])
+        for w_item in web_sources["wikipedia"]:
+            if not any(w_item["title"].lower() == old["title"].lower() for old in sources_data["wikipedia"]):
+                sources_data["wikipedia"].append(w_item)
         
         for category in ["wikipedia", "official_sources", "trusted_news"]:
             best_cat_sim = 0.0
@@ -783,9 +998,12 @@ def analyze_text(text: str) -> dict:
                 logger.info(f"[Evidence Engine Audit] Compare {category}: '{item['title']}' | SemSim: {sem_sim:.3f}, StrSim: {str_sim:.1f}%")
                 
                 is_match = False
-                if sem_sim >= 0.75 or str_sim >= 75.0:
+                if sem_sim >= 0.70 or str_sim >= 70.0:
                     is_match = True
                 else:
+                    flat_entities = []
+                    for items in u_ent.values():
+                        flat_entities.extend(list(items))
                     is_match = check_fallback_match(claim_query, item['title'], item['snippet'], flat_entities)
                     if is_match:
                         sem_sim = max(sem_sim, 0.85)
@@ -802,13 +1020,12 @@ def analyze_text(text: str) -> dict:
                 cat_score = 0.90 if is_refuting else 0.10
                 
                 publisher_clean = clean_publisher_name(best_cat_item["url"], best_cat_item["publisher"])
+                badge, score = get_source_reliability_badge_and_score(best_cat_item["url"], publisher_clean)
                 
-                # Format dates
                 pub_d = "N/A"
                 if best_cat_item.get("timestamp"):
                     pub_d = format_wikipedia_timestamp(best_cat_item["timestamp"])
                 else:
-                    # Look for date in snippet
                     date_match = re.search(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*+\s+\d{1,2},\s+\d{4}\b', best_cat_item["snippet"])
                     if date_match:
                         pub_d = date_match.group(0)
@@ -822,11 +1039,12 @@ def analyze_text(text: str) -> dict:
                     "snippet": best_cat_item["snippet"],
                     "published_date": pub_d,
                     "last_updated": pub_d,
-                    "reliability_badge": get_source_reliability_badge(best_cat_item["url"], publisher_clean)
+                    "reliability_badge": badge,
+                    "reliability_score": score
                 }
                 logger.info(f"[Evidence Engine Audit] {category} Match ACCEPTED: verdict={verdict_state}, score={cat_score}")
 
-    # Compile the final UI evidence list
+    # Compile UI evidence items
     for cat_name, val in cat_matches.items():
         if val:
             source_label = "Google Factcheck" if cat_name == "google_factcheck" else (
@@ -834,6 +1052,13 @@ def analyze_text(text: str) -> dict:
                     "Trusted News" if cat_name == "trusted_news" else "Wikipedia"
                 )
             )
+            
+            strength = "Neutral"
+            if val["verdict"] == "Confirming":
+                strength = "Supporting"
+            elif val["verdict"] == "Refuting":
+                strength = "Contradicting"
+                
             evidence_list_to_ui.append({
                 "source_type": source_label,
                 "title": val["title"],
@@ -843,15 +1068,16 @@ def analyze_text(text: str) -> dict:
                 "snippet": val["snippet"],
                 "published_date": val["published_date"],
                 "last_updated": val["last_updated"],
-                "reliability_badge": val["reliability_badge"]
+                "reliability_badge": val["reliability_badge"],
+                "reliability_score": val["reliability_score"],
+                "evidence_strength": strength
             })
             
-            # Format timeline items
             if val["last_updated"] != "N/A":
                 latest_update_date = val["last_updated"]
                 latest_source_name = val["publisher"]
 
-    # FUSION ALGORITHM (weights re-normalization)
+    # FUSION ALGORITHM
     weights = {
         "google_factcheck": 0.35,
         "trusted_news": 0.25,
@@ -871,7 +1097,7 @@ def analyze_text(text: str) -> dict:
     weighted_sum = sum(src["score"] * src["weight"] for src in active_sources.values())
     nlp_prob = weighted_sum / total_weight
     
-    # Step 6 override Verified True
+    # Consensus overrides
     confirming_sources = [
         k for k, v in cat_matches.items() 
         if v and v["verdict"] == "Confirming" and k != "google_factcheck"
@@ -920,7 +1146,7 @@ def analyze_text(text: str) -> dict:
         if val and val["verdict"] == "Refuting":
             flagged_claims.append(f"{cat.replace('_',' ').title()} ({val['publisher']}): Refuted")
 
-    # Dynamic "Why this verdict?" bullet generator
+    # Dynamic "Why this verdict?" bullets
     why_verdict_bullets = []
     for cat, val in cat_matches.items():
         if val:
@@ -944,48 +1170,37 @@ def analyze_text(text: str) -> dict:
     contradiction_detected = confirming_count > 0 and refuting_count > 0
     contradiction_text = ""
     if contradiction_detected:
-        contradiction_text = f"Conflicting Evidence Detected. {confirming_count} trusted source(s) support this claim, while {refuting_count} trusted source(s) dispute it. Manual verification recommended."
+        c_confirming = [v["publisher"] for v in cat_matches.values() if v and v["verdict"] == "Confirming"]
+        c_refuting = [v["publisher"] for v in cat_matches.values() if v and v["verdict"] == "Refuting"]
+        contradiction_text = f"Conflicting Evidence Detected: {', '.join(c_confirming)} confirms this claim, but {', '.join(c_refuting)} disputes it. Manual verification recommended."
 
-    # primary_entity and evidence_sources lists
+    # Primary publisher entity constraint (Wikipedia cannot be primary entity)
     primary_entity = "N/A"
     all_evidence_publishers = []
     for item in evidence_list_to_ui:
         all_evidence_publishers.append(item["publisher"])
         
+    all_ents = extract_named_entities(text)
+    
     if all_evidence_publishers:
-        # De-duplicate
         seen = set()
         all_evidence_publishers = [x for x in all_evidence_publishers if not (x in seen or seen.add(x))]
-        # Exclude Wikipedia if others are present
         entity_candidates = [p for p in all_evidence_publishers if p != "Wikipedia"]
         if entity_candidates:
             primary_entity = entity_candidates[0]
         else:
-            primary_entity = all_evidence_publishers[0]
+            if all_ents.get("ORGANIZATION"):
+                primary_entity = list(all_ents["ORGANIZATION"])[0]
+            else:
+                primary_entity = "Community Source (Wikipedia)"
 
-    # Confidence breakdown progress bars
-    overall_confidence_pct = round(total_weight * 100)
+    # Confidence metrics progress bars
     evidence_conf = 90 if len(evidence_list_to_ui) >= 2 else (70 if len(evidence_list_to_ui) == 1 else 15)
     model_conf = round(conf * 100)
     
-    # Source reliability calculation
-    reliability_ratings = []
-    for item in evidence_list_to_ui:
-        b = item["reliability_badge"]
-        if b in ["Space Agency", "Government"]:
-            reliability_ratings.append(95)
-        elif b in ["Fact Checker", "Major News Agency"]:
-            reliability_ratings.append(88)
-        elif b == "University":
-            reliability_ratings.append(92)
-        elif b == "Community Source":
-            reliability_ratings.append(78)
-        else:
-            reliability_ratings.append(50)
-            
+    reliability_ratings = [item["reliability_score"] for item in evidence_list_to_ui]
     source_reliability_pct = round(sum(reliability_ratings) / len(reliability_ratings)) if reliability_ratings else 40
     
-    # Consensus strength
     if contradiction_detected:
         consensus_strength_pct = 25
     elif len(evidence_list_to_ui) >= 2:
@@ -995,17 +1210,32 @@ def analyze_text(text: str) -> dict:
     else:
         consensus_strength_pct = 15
 
-    # Timeline freshness
+    # Deterministic Confidence calculation
+    model_weight = 0.35
+    source_weight = 0.35
+    agreement_weight = 0.20
+    g_weight = 0.10
+    
+    g_comp = 100 if google_factcheck_active else (50 if google_api_status == "No verified claim found" else 0)
+    
+    overall_confidence_pct = round(
+        (model_conf * model_weight) +
+        (source_reliability_pct * source_weight) +
+        (consensus_strength_pct * agreement_weight) +
+        (g_comp * g_weight)
+    )
+    overall_confidence_pct = min(100, max(0, overall_confidence_pct))
+
+    # Timeline freshness dates
     claim_published_date = "N/A"
     if extracted_dates_list:
         claim_published_date = extracted_dates_list[0]
     elif evidence_list_to_ui:
-        # Fallback to earliest published date in matches
         dates_found = [i["published_date"] for i in evidence_list_to_ui if i["published_date"] != "N/A"]
         if dates_found:
             claim_published_date = min(dates_found)
 
-    # Dynamic Evidence Contribution weights (summing to 100)
+    # Dynamic Evidence Contribution weights
     contrib = {
         "nlp_analysis": round((weights["distilbert"] / total_weight) * 95),
         "official_sources": round((weights["official_sources"] / total_weight) * 95) if cat_matches["official_sources"] else 0,
@@ -1018,7 +1248,6 @@ def analyze_text(text: str) -> dict:
     contrib_sum = sum(contrib.values())
     if contrib_sum > 0:
         evidence_contrib_dict = {k: round((v / contrib_sum) * 100) for k, v in contrib.items() if v > 0}
-        # Force re-normalization to sum exactly to 100
         rem = 100 - sum(evidence_contrib_dict.values())
         if rem != 0 and evidence_contrib_dict:
             k_first = list(evidence_contrib_dict.keys())[0]
@@ -1026,29 +1255,35 @@ def analyze_text(text: str) -> dict:
     else:
         evidence_contrib_dict = {"nlp_analysis": 100}
 
-    # Extract dynamic entities lists
-    spacy_nlp = get_spacy_nlp()
-    all_ents = extract_named_entities(text)
-    
+    # Compile explainability report
     explainability_report = {
-        "entities": list(all_ents["PERSON"].union(all_ents["ORGANIZATION"]).union(all_ents["LOCATION"]).union(all_ents["DATE"]).union(all_ents["EVENT"])),
-        "organizations": list(all_ents["ORGANIZATION"]),
-        "locations": list(all_ents["LOCATION"]),
-        "dates": list(all_ents["DATE"]),
+        "entities": list(
+            all_ents.get("PERSON", set())
+            .union(all_ents.get("ORGANIZATION", set()))
+            .union(all_ents.get("LOCATION", set()))
+            .union(all_ents.get("COUNTRY", set()))
+            .union(all_ents.get("DATE", set()))
+            .union(all_ents.get("EVENT", set()))
+            .union(all_ents.get("NUMBER", set()))
+            .union(all_ents.get("PRODUCT", set()))
+        ),
+        "organizations": list(all_ents.get("ORGANIZATION", set())),
+        "locations": list(all_ents.get("LOCATION", set()).union(all_ents.get("COUNTRY", set()))),
+        "dates": list(all_ents.get("DATE", set())),
         "factual_claims": extracted_claims,
         "supporting_evidence": [i["title"] for i in evidence_list_to_ui if i["verdict"] == "Confirming"],
         "contradicting_evidence": [i["title"] for i in evidence_list_to_ui if i["verdict"] == "Refuting"],
-        "missing_evidence": [src for src in ["Google Fact Check", "Wikipedia", "Official Sources", "News Agencies"] if not cat_matches.get(src.lower().replace(" ","_"))],
+        "evidence_used": [f"{i['publisher']}: {i['title']}" for i in evidence_list_to_ui],
+        "evidence_ignored": wikipedia_ignored_pages,
         "risk_factors": [
-            "High linguistic styling markers (exclamation/all-caps/clickbait bias)." if linguistic_score > 0.65 else "Low writing styling bias.",
+            "High linguistic bias styling markers found." if linguistic_score > 0.65 else "Low writing styling bias.",
             "Lack of official primary organization statement." if not cat_matches["official_sources"] else "Confirmed by official organization statements.",
-            "Conflicting third-party information reports." if contradiction_detected else "No conflicting evidence detected."
+            "Conflicting third-party reports found." if contradiction_detected else "No conflicting evidence detected."
         ],
-        "reason_confidence": f"Evidence weight ({evidence_conf}%) + Source trust rating ({source_reliability_pct}%) + Model bias verification ({model_conf}%).",
-        "reason_verdict": f"The final consensus verdict was reached based on: {evidence_summary}"
+        "reason_confidence": f"Confidence Formula: 35% Model Prediction ({model_conf}%) + 35% Source Reliability ({source_reliability_pct}%) + 20% Cross-source Agreement ({consensus_strength_pct}%) + 10% Google Fact Check component ({g_comp}%) = {overall_confidence_pct}%.",
+        "reason_verdict": f"Consensus reasoning: {evidence_summary}"
     }
 
-    # Package factcheck_debug payload
     factcheck_debug = {
         "user_claim": primary_claim,
         "matched_claim": cat_matches["google_factcheck"]["title"] if google_factcheck_active else (
@@ -1072,8 +1307,6 @@ def analyze_text(text: str) -> dict:
         ),
         "status_text": evidence_summary,
         "evidence_summary": evidence_summary if evidence_list_to_ui else "No trusted evidence available.",
-        
-        # New upgraded attributes (UI Improvements & explainability)
         "google_status": google_api_status,
         "google_status_explanation": google_api_explanation,
         "google_query": google_request_url,
@@ -1105,7 +1338,6 @@ def analyze_text(text: str) -> dict:
         ])
     }
 
-    # Verify local database claim similarity for overrides
     sim_results = check_claim_similarity(text)
     if sim_results["score"] > 0.75:
         flagged_claims.append(f"Local Match: {sim_results['claim']}")
