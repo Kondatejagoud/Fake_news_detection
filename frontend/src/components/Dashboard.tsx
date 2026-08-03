@@ -487,7 +487,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Explainable AI Report Card */}
-        <div className="md:col-span-2 glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-4">
+        <div className="md:col-span-2 glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-5">
           <div className="flex items-center gap-2">
             <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -508,69 +508,145 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
             <div>
-              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Entity Recognition</span>
-              <p className="text-[10px] text-slate-500 italic bg-slate-950/20 p-2.5 rounded-lg border border-slate-900">
-                Named entity parsing is not available for this analysis.
-              </p>
+              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Detected Named Entities</span>
+              <div className="bg-slate-950/20 p-3 rounded-lg border border-slate-900 min-h-[100px] flex flex-wrap gap-1.5 align-content-start">
+                {debug?.explainability_report?.entities && debug.explainability_report.entities.length > 0 ? (
+                  <>
+                    {debug.explainability_report.organizations.map((org: string, idx: number) => (
+                      <span key={`org-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        🏢 {org}
+                      </span>
+                    ))}
+                    {debug.explainability_report.locations.map((loc: string, idx: number) => (
+                      <span key={`loc-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        📍 {loc}
+                      </span>
+                    ))}
+                    {debug.explainability_report.dates.map((dt: string, idx: number) => (
+                      <span key={`dt-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        📅 {dt}
+                      </span>
+                    ))}
+                    {debug.explainability_report.entities
+                      .filter((e: string) => 
+                        !debug.explainability_report.organizations.includes(e) &&
+                        !debug.explainability_report.locations.includes(e) &&
+                        !debug.explainability_report.dates.includes(e)
+                      )
+                      .slice(0, 10)
+                      .map((p: string, idx: number) => (
+                        <span key={`p-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          👤 {p}
+                        </span>
+                      ))
+                    }
+                  </>
+                ) : (
+                  <span className="text-[10px] text-slate-500 italic">No named entities detected in this claim text.</span>
+                )}
+              </div>
             </div>
+            
             <div>
-              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Reasoning Checklist</span>
-              <div className="space-y-1.5">
-                {explanation.map((item, idx) => (
-                  <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
-                    <span className="text-emerald-400 font-bold">✓</span>
-                    <p className="leading-tight">{item.substring(0, 75)}...</p>
-                  </div>
-                ))}
+              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Why this verdict?</span>
+              <div className="space-y-1.5 min-h-[100px]">
+                {debug?.why_verdict && debug.why_verdict.length > 0 ? (
+                  debug.why_verdict.map((item: string, idx: number) => (
+                    <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
+                      <span className={item.startsWith("✓") ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {item.startsWith("✓") ? "✓" : "🚨"}
+                      </span>
+                      <p className="leading-tight">{item.replace(/^✓\s*/, "").replace(/^🚨\s*/, "")}</p>
+                    </div>
+                  ))
+                ) : (
+                  explanation.map((item, idx) => (
+                    <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <p className="leading-tight">{item}</p>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
+
+          {debug?.explainability_report && (
+            <div className="border-t border-slate-900/60 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-4 text-[10.5px]">
+              <div className="space-y-2">
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Supporting Evidence</span>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {debug.explainability_report.supporting_evidence.length > 0 ? (
+                      debug.explainability_report.supporting_evidence.map((item: string, idx: number) => (
+                        <li key={idx} className="truncate">{item}</li>
+                      ))
+                    ) : (
+                      <li className="text-slate-500 italic list-none">No confirming evidence found.</li>
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Contradicting Evidence</span>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {debug.explainability_report.contradicting_evidence.length > 0 ? (
+                      debug.explainability_report.contradicting_evidence.map((item: string, idx: number) => (
+                        <li key={idx} className="text-rose-400 truncate">{item}</li>
+                      ))
+                    ) : (
+                      <li className="text-slate-500 italic list-none">No contradicting evidence found.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Linguistic & Domain Risk Factors</span>
+                  <ul className="list-disc list-inside text-slate-300 space-y-0.5">
+                    {debug.explainability_report.risk_factors.map((item: string, idx: number) => (
+                      <li key={idx} className="leading-normal">{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Confidence Logic</span>
+                  <p className="text-slate-300 leading-normal bg-slate-950/20 p-2 rounded border border-slate-900/60 font-mono text-[9px]">
+                    {debug.explainability_report.reason_confidence}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Timeline & Action Cards Column */}
         <div className="md:col-span-1 space-y-6">
           
-          {/* Authenticity Timeline */}
+          {/* Freshness Timeline */}
           <div className="glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-4">
-            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Pipeline Execution Path</span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Consensus Freshness Timeline</span>
             
             <div className="relative pl-4 border-l border-slate-800 space-y-4 text-[10px] font-mono">
               <div className="relative">
-                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-slate-200">Input Received</span>
+                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-sky-400" />
+                <div className="text-slate-200">Claim Published</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">{debug?.timeline?.claim_published || "Unknown Date"}</div>
               </div>
               <div className="relative">
-                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-slate-200">Extraction Layer Completed</span>
+                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-indigo-400" />
+                <div className="text-slate-200">Fact Check Published</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">{debug?.timeline?.fact_check_published || "N/A"}</div>
               </div>
-              
-              {/* Conditional processing stages */}
-              {modules_run.includes("text_nlp") && (
-                <div className="relative">
-                  <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-slate-200">NLP Classifier Evaluated</span>
-                </div>
-              )}
-              {modules_run.includes("image_forensics") && (
-                <div className="relative">
-                  <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-slate-200">Image Forensics Calculated</span>
-                </div>
-              )}
-              {modules_run.includes("deepfake") && (
-                <div className="relative">
-                  <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-slate-200">Deepfake Facial Verified</span>
-                </div>
-              )}
-              
               <div className="relative">
-                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-slate-200">Consensus Fused</span>
+                <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-violet-400" />
+                <div className="text-slate-200">Latest Sources Checked</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">{debug?.timeline?.latest_update || "N/A"}</div>
               </div>
               <div className="relative font-bold text-emerald-400">
                 <span className="absolute -left-[21px] top-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span>Verdict Logged</span>
+                <div>Latest Source Publisher</div>
+                <div className="text-[9px] text-emerald-400/80 mt-0.5">{debug?.timeline?.latest_source || "N/A"}</div>
               </div>
             </div>
           </div>
@@ -627,95 +703,222 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
 
       </div>
 
-      {/* 7. Fact Check Debug Trace Panel (Task 8) */}
+      {/* 7. Fact Check Debug Trace Panel (Task 8 Upgrade) */}
       {debug && (
-        <div className="glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-5">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <h4 className="text-sm font-heading font-extrabold text-slate-200 uppercase tracking-wide">Multi-Source Evidence Consensus</h4>
+        <div className="glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-6">
+          
+          <div className="flex items-center justify-between border-b border-slate-900/60 pb-4">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <h4 className="text-sm font-heading font-extrabold text-slate-200 uppercase tracking-wide">Multi-Source Evidence Consensus</h4>
+            </div>
+            {debug.verdict && (
+              <span className={`text-[10px] uppercase font-extrabold px-3 py-1 rounded border ${
+                debug.verdict === "True" 
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                  : debug.verdict === "False"
+                  ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                  : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+              }`}>
+                Verdict: {debug.verdict}
+              </span>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono text-slate-300">
-            <div className="space-y-2">
+          {/* Dynamic Warning Alert on Contradictions */}
+          {debug.contradiction_detected && (
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl p-4 flex gap-3 text-xs leading-relaxed animate-pulse">
+              <span className="text-base">⚠️</span>
               <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Verified Claim</span>
-                <span className="text-slate-200 break-words font-sans">{debug.user_claim || debug.extracted_claim || "—"}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Primary Publisher</span>
-                <span className="text-sky-400 font-sans block">{debug.publisher || debug.matched_publisher || "N/A"}</span>
+                <span className="font-extrabold block uppercase tracking-wider text-[10px] mb-0.5">Conflicting Evidence Detected</span>
+                <span>{debug.contradiction_text}</span>
               </div>
             </div>
-            
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-bold block">Google API Queries</span>
-                  <span className="text-slate-200 font-bold text-xs">{debug.google_query && debug.google_query !== "N/A" ? "✔ Active" : "⚪ Unavailable"}</span>
+          )}
+
+          {/* Row of core metadata parameters */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-slate-300">
+            {/* Primary Source details */}
+            <div className="space-y-3 bg-slate-950/20 p-4 rounded-xl border border-slate-900">
+              <div>
+                <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Primary Entity</span>
+                <span className="text-sky-400 font-extrabold text-sm block">{debug.primary_entity || "N/A"}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Evidence Sources</span>
+                <div className="flex flex-wrap gap-1">
+                  {debug.evidence_sources && debug.evidence_sources.length > 0 ? (
+                    debug.evidence_sources.map((src: string, idx: number) => (
+                      <span key={idx} className="text-[9px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/40">
+                        {src}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-slate-500 italic text-[10px]">No trusted evidence available.</span>
+                  )}
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-500 uppercase font-bold block">Verdict Consensus</span>
-                  <span className={`font-bold uppercase ${hasMatch ? (statusBadge.label.includes("FALSE") ? "text-rose-400" : "text-emerald-400") : "text-slate-400"}`}>
-                    {debug.verdict || "Unverified"}
+              </div>
+            </div>
+
+            {/* Google status card */}
+            <div className="space-y-3 bg-slate-950/20 p-4 rounded-xl border border-slate-900">
+              <div>
+                <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Google Fact Check Status</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`text-[10.5px] font-extrabold px-2 py-0.5 rounded border ${
+                    debug.google_status === "Verified claim found" 
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                      : debug.google_status === "No verified claim found"
+                      ? "bg-slate-800/80 text-slate-300 border-slate-700/60"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                  }`}>
+                    {debug.google_status === "Verified claim found" ? "✓ " : ""}
+                    {debug.google_status || "API unavailable"}
                   </span>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                  {debug.google_status_explanation || "No details available."}
+                </p>
               </div>
+            </div>
+
+            {/* Evidence Contribution dynamic list */}
+            <div className="space-y-3 bg-slate-950/20 p-4 rounded-xl border border-slate-900 flex flex-col justify-center">
               <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Consensus Formulation Weighting</span>
-                <span className="text-emerald-400 text-[11px] font-bold block">{debug.final_score_calculation}</span>
+                <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Evidence Contribution</span>
+                <div className="space-y-1.5 font-mono text-[10.5px]">
+                  {debug.evidence_contribution ? (
+                    Object.entries(debug.evidence_contribution).map(([key, val]: any) => {
+                      const labels: Record<string, string> = {
+                        nlp_analysis: "NLP Analysis",
+                        official_sources: "Official Sources",
+                        google_factcheck: "Google Fact Check",
+                        wikipedia: "Wikipedia Pages",
+                        trusted_news: "Trusted News Outlet",
+                        cross_source_agreement: "Cross-source Agreement"
+                      };
+                      return (
+                        <div key={key} className="flex justify-between items-center">
+                          <span className="text-slate-400">{labels[key] || key}</span>
+                          <span className="flex-1 border-b border-dotted border-slate-800 mx-2" />
+                          <span className="font-extrabold text-slate-200">{val}%</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-slate-500 italic">No contribution metrics generated.</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Evidence Consensus Summary */}
-          <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-4 space-y-1">
-            <span className="text-[10px] text-slate-500 uppercase font-bold block">Evidence Audit Summary</span>
+          {/* Evidence Consensus Summary block */}
+          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-4 space-y-1">
+            <span className="text-[10px] text-slate-500 uppercase font-bold block">Consensus reasoning Audit</span>
             <p className="text-slate-300 text-xs leading-normal">
               {debug.evidence_summary || "No active evidence summary generated."}
             </p>
           </div>
 
-          {/* Evidence Consensus Grid */}
-          {debug.evidence_list && debug.evidence_list.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-slate-900/50">
-              <span className="text-[10px] text-slate-500 uppercase font-bold block">Consensus Source Evidences</span>
+          {/* New Upgraded Confidence Breakdown section */}
+          {debug.confidence_breakdown && (
+            <div className="bg-slate-950/20 p-5 rounded-xl border border-slate-900 space-y-4">
+              <span className="text-[10px] text-slate-500 uppercase font-bold block">Consensus Confidence Breakdown</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+                {Object.entries(debug.confidence_breakdown).map(([key, val]: any) => {
+                  const labels: Record<string, string> = {
+                    overall_confidence: "Overall Confidence",
+                    evidence_confidence: "Evidence Confidence",
+                    model_confidence: "Model Confidence",
+                    source_reliability: "Source Reliability",
+                    consensus_strength: "Consensus Strength"
+                  };
+                  return (
+                    <div key={key} className="space-y-1.5">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[9.5px] uppercase font-bold text-slate-400 truncate tracking-tight">{labels[key] || key}</span>
+                        <span className="text-[11px] font-extrabold text-sky-400">{val}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full"
+                          style={{ width: `${val}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Source Evidence Cards list */}
+          {debug.evidence_list && debug.evidence_list.length > 0 ? (
+            <div className="space-y-3 pt-3 border-t border-slate-900/50">
+              <span className="text-[10px] text-slate-500 uppercase font-bold block">Indexed Evidence Cards</span>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {debug.evidence_list.map((item: any, idx: number) => (
-                  <div key={idx} className="bg-slate-950/40 rounded-xl p-3 border border-slate-800/40 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] uppercase font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
-                        {item.source_type}
-                      </span>
-                      <span className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded border ${
-                        item.verdict === "Confirming" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                      }`}>
-                        {item.verdict}
-                      </span>
-                    </div>
+                  <div key={idx} className="bg-slate-950/40 rounded-xl p-4 border border-slate-800/40 space-y-3 text-xs flex flex-col justify-between hover:border-slate-700/60 transition-colors">
                     <div>
-                      {item.url ? (
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-[8.5px] font-extrabold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20 uppercase">
+                          {item.source_type}
+                        </span>
+                        <div className="flex gap-1.5 items-center">
+                          <span className="text-[8px] font-bold bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30">
+                            🛡️ {item.reliability_badge}
+                          </span>
+                          <span className={`text-[8.5px] font-extrabold px-2 py-0.5 rounded border uppercase ${
+                            item.verdict === "Confirming" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          }`}>
+                            {item.verdict}
+                          </span>
+                        </div>
+                      </div>
+                      <h5 className="font-heading font-extrabold text-slate-200 leading-tight">
+                        {item.title}
+                      </h5>
+                      
+                      <div className="flex gap-x-3 gap-y-0.5 flex-wrap text-[9.5px] text-slate-500 font-mono mt-1 mb-2">
+                        <span>Publisher: <span className="text-slate-400 font-sans font-bold">{item.publisher}</span></span>
+                        {item.published_date && item.published_date !== "N/A" && (
+                          <span>Published: <span className="text-slate-400 font-sans">{item.published_date}</span></span>
+                        )}
+                        {item.last_updated && item.last_updated !== "N/A" && (
+                          <span>Updated: <span className="text-slate-400 font-sans">{item.last_updated}</span></span>
+                        )}
+                      </div>
+                      
+                      <p className="text-slate-400 text-[11px] leading-snug line-clamp-3 bg-slate-900/10 p-2 rounded border border-slate-900/40">
+                        {item.snippet}
+                      </p>
+                    </div>
+                    {item.url && (
+                      <div className="pt-2">
                         <a 
                           href={item.url} 
                           target="_blank" 
                           rel="noopener noreferrer" 
-                          className="font-bold text-slate-200 hover:text-sky-400 transition-colors block leading-tight hover:underline"
+                          className="w-full inline-flex justify-center items-center py-1.5 text-[9.5px] font-extrabold rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-sky-400 hover:text-sky-300 transition-colors uppercase tracking-wider gap-1 hover:underline"
                         >
-                          {item.title}
+                          Open Source
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
                         </a>
-                      ) : (
-                        <span className="font-bold text-slate-200 block leading-tight">{item.title}</span>
-                      )}
-                      <span className="text-[10px] text-slate-500 block mt-0.5">Publisher: {item.publisher}</span>
-                    </div>
-                    <p className="text-slate-400 text-[11px] leading-snug line-clamp-3">
-                      {item.snippet}
-                    </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="text-slate-500 italic text-xs text-center py-4 border border-dashed border-slate-800 rounded-xl">
+              No trusted evidence available.
             </div>
           )}
         </div>
