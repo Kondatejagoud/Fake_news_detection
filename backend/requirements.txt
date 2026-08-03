@@ -1,0 +1,22 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+sqlalchemy
+psycopg2-binary
+python-multipart
+trafilatura==1.8.0
+newspaper3k==0.2.8
+easyocr
+opencv-python-headless
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
+transformers
+sentence-transformers
+mtcnn
+pytest
+httpx
+numpy
+lxml_html_clean>=0.1.0
+spacy
+rapidfuzz

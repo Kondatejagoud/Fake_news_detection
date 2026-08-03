@@ -1,0 +1,83 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_stage/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.vite/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment configurations (Credentials/Secrets)
+.env
+.env*.local
+*.env
+
+# SQLite local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# ML caches (HuggingFace / EasyOCR / Torch models)
+backend/cache/
+cache/
+
+# Test caches & Reports
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+htmlcov/
+
+# Logs and databases
+*.log
+local_database.db
+
+# Diagnostic dumps & Scratch scripts
+backend/ddg_dump*.html
+backend/scratch_*.py
+scratch_*.py
+
+# System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
