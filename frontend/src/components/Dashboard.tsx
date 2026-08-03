@@ -21,6 +21,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
     created_at,
   } = data;
 
+  const getVerdictLabel = (score: number) => {
+    if (score >= 95) return "Verified";
+    if (score >= 80) return "Likely True";
+    if (score >= 60) return "Needs Review";
+    if (score >= 40) return "Suspicious";
+    if (score >= 20) return "Likely False";
+    return "False";
+  };
+
+  const getVerdictColorClass = (score: number) => {
+    if (score >= 80) return "text-emerald-400";
+    if (score >= 40) return "text-amber-400";
+    return "text-rose-400";
+  };
+
   // 1. Dynamic count-up animations for scores
   const [scoreCount, setScoreCount] = useState(0);
   const [confidenceCount, setConfidenceCount] = useState(0);
@@ -100,29 +115,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
   const hasMatch = verdict !== "Unverified" && verdict !== "N/A";
 
   const getStatusBadge = () => {
-    if (hasMatch) {
-      const isFake = verdict.toLowerCase() === "false" || verdict.toLowerCase() === "refuting";
-      if (isFake) {
-        return {
-          label: "VERIFIED FALSE",
-          badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
-          icon: (
-            <svg className="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          )
-        };
-      } else {
-        return {
-          label: "VERIFIED TRUE",
-          badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-          icon: (
-            <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          )
-        };
-      }
+    const verdictLower = verdict.toLowerCase();
+    if (verdictLower === "verified" || verdictLower === "confirming" || verdictLower === "true" || verdictLower === "likely true") {
+      return {
+        label: "VERIFIED TRUE",
+        badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+        icon: (
+          <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        )
+      };
+    } else if (verdictLower === "false" || verdictLower === "refuting" || verdictLower === "likely false") {
+      return {
+        label: "VERIFIED FALSE",
+        badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
+        icon: (
+          <svg className="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        )
+      };
     } else {
       return {
         label: "UNVERIFIED",
@@ -296,8 +309,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
           </div>
           
           <div className="mt-4 space-y-1">
-            <div className={`text-md font-heading font-extrabold tracking-wide uppercase ${theme.text}`}>
-              {authenticity_score >= 70 ? "REAL NEWS" : authenticity_score >= 40 ? "SUSPICIOUS" : "LIKELY FAKE"}
+            <div className={`text-md font-heading font-extrabold tracking-wide uppercase ${getVerdictColorClass(authenticity_score)}`}>
+              {getVerdictLabel(authenticity_score)}
             </div>
             
             <div className="flex gap-4 text-[11px] text-slate-400 pt-2 border-t border-slate-800/80 mt-2">
@@ -855,6 +868,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
               </div>
             </div>
           )}
+
+          {/* Evidence Summary Section (Step 8) */}
+          <div className="bg-slate-950/45 rounded-xl p-4 border border-slate-800/60 space-y-3 pt-3 mt-3">
+            <span className="text-[10px] text-sky-400 uppercase font-extrabold tracking-wider block">Evidence Verification Summary</span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
+              <div>
+                <span className="text-slate-500 block text-[9px] uppercase font-bold">Google Fact Check</span>
+                <span className={`font-bold ${debug.google_status === "Verified claim found" ? "text-emerald-400" : "text-slate-400"}`}>
+                  {debug.google_status === "Verified claim found" ? (debug.verdict === "True" ? "Confirmed" : "Refuted") : "No Match"}
+                </span>
+              </div>
+              {debug.evidence_list && debug.evidence_list.map((item: any, idx: number) => (
+                <div key={idx}>
+                  <span className="text-slate-500 block text-[9px] uppercase font-bold">{item.publisher}</span>
+                  <span className={`font-bold ${item.verdict === "Confirming" ? "text-emerald-400" : item.verdict === "Refuting" ? "text-rose-400" : "text-slate-400"}`}>
+                    {item.verdict === "Confirming" ? "Confirmed" : item.verdict === "Refuting" ? "Refuted" : "Neutral"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-slate-900/60 pt-2 flex flex-wrap gap-x-6 text-[10.5px] font-sans">
+              <div>
+                <span className="text-slate-500 font-semibold">Evidence Agreement:</span>{" "}
+                <span className="text-slate-200 font-bold font-mono">
+                  {debug.evidence_list && debug.evidence_list.length > 0 ? (
+                    `${Math.round(
+                      (debug.evidence_list.filter((e: any) => e.verdict === "Confirming").length /
+                        debug.evidence_list.length) *
+                        100
+                    )}%`
+                  ) : (
+                    "0%"
+                  )}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-semibold">Verdict:</span>{" "}
+                <span className={`font-bold ${getVerdictColorClass(authenticity_score)}`}>
+                  {getVerdictLabel(authenticity_score)}
+                </span>
+              </div>
+            </div>
+          </div>
 
           {/* Source Evidence Cards list */}
           {debug.evidence_list && debug.evidence_list.length > 0 ? (
