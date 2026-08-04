@@ -1,4 +1,16 @@
-# Use official lightweight Python image
+# --- Stage 1: Build Frontend React App ---
+FROM node:18-alpine AS frontend-builder
+WORKDIR /frontend
+# Copy package files first
+COPY frontend/package*.json ./
+# Install dependencies
+RUN npm install
+# Copy frontend source
+COPY frontend/ ./
+# Build production assets to /frontend/dist
+RUN npm run build
+
+# --- Stage 2: Build FastAPI Python App ---
 FROM python:3.11-slim
 
 # Set environment variables
@@ -19,17 +31,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file first to utilize Docker layer caching
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 # Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend app source code and pre-download script
-COPY app/ ./app/
-COPY download_models.py .
+COPY backend/app/ ./app/
+COPY backend/download_models.py .
+
+# Copy the built frontend static assets from Stage 1 into the FastAPI app's static/ directory
+COPY --from=frontend-builder /frontend/dist ./app/static
 
 # Pre-download ML models so they are baked into the container image
-# This avoids long delays and download issues at runtime on Railway
 RUN python download_models.py
 
 # Expose port (Railway injects PORT env variable)
