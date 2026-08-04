@@ -67,12 +67,14 @@ async def analyze_content(
     elif "multipart/form-data" in content_type:
         try:
             form = await request.form()
+
             input_type = form.get("input_type")
             if input_type not in ["image", "video"]:
                 raise HTTPException(status_code=400, detail="For file uploads, input_type must be 'image' or 'video'.")
                 
             upload_file = form.get("file")
-            if not isinstance(upload_file, UploadFile):
+            from starlette.datastructures import UploadFile as StarletteUploadFile
+            if not isinstance(upload_file, (UploadFile, StarletteUploadFile)):
                 raise HTTPException(status_code=400, detail="Missing file parameter 'file' in multipart form.")
                 
             # Basic file size validation
