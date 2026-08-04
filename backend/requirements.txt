@@ -20,3 +20,5 @@ numpy
 lxml_html_clean>=0.1.0
 spacy
 rapidfuzz
+imageio-ffmpeg
+vosk
