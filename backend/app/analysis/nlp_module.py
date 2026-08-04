@@ -64,6 +64,10 @@ def get_spacy_nlp():
 def get_sentence_model():
     global _sentence_model
     if _sentence_model is None:
+        if settings.DISABLE_SENTENCE_TRANSFORMERS:
+            logger.info("Sentence-Transformers disabled by configuration settings. Forcing token similarity fallback.")
+            _sentence_model = False
+            return _sentence_model
         try:
             from sentence_transformers import SentenceTransformer
             logger.info("Initializing Sentence-Transformers Model...")

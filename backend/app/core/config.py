@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     VOSK_MODEL_PATH: str = "./cache/vosk/vosk-model-small-en-us-0.15"
     
     ENABLE_MOCK_FALLBACK: bool = True
+    DISABLE_SENTENCE_TRANSFORMERS: bool = False
     
     # Request limits (to prevent OOM on hobby containers)
     MAX_FILE_SIZE_MB: int = 15  # Limit video uploads to 15MB on free tier
