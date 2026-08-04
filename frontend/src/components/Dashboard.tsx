@@ -112,7 +112,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
   // Task 4, 5, 8: Fact Check Debug Trace
   const debug = (module_results.text_nlp as any)?.factcheck_debug;
   const verdict = debug?.verdict || "Unverified";
-  const hasMatch = verdict !== "Unverified" && verdict !== "N/A";
+
 
   const getStatusBadge = () => {
     const verdictLower = verdict.toLowerCase();
