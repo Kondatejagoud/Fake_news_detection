@@ -35,7 +35,10 @@ def generate_report(
         # Renders the consensus evidence summary directly
         evidence_summary = debug.get("evidence_summary", "")
         if evidence_summary:
-            explanations.append(f"Consensus Audit: {evidence_summary}")
+            if input_type == "video":
+                explanations.append(f"Spoken Claims Audit: {evidence_summary}")
+            else:
+                explanations.append(f"Consensus Audit: {evidence_summary}")
             
         verdict = debug.get("verdict", "Unverified")
         if verdict != "Unverified":
@@ -53,27 +56,52 @@ def generate_report(
             verdict_lower = factcheck_verdict.lower()
             is_fake = any(w in verdict_lower for w in ["false", "fake", "untrue", "misleading", "incorrect", "debunked", "hoax", "distorted", "manipulated", "wrong"])
             if is_fake:
-                explanations.append(
-                    f"VERDICT FALSE: Active fact checkers confirm this statement is inaccurate/false (Fake probability: {conf_pct}%)."
-                )
+                if input_type == "video":
+                    explanations.append(
+                        f"VERDICT FALSE: Active fact checkers confirm the spoken statements are inaccurate/false (Fake probability: {conf_pct}%)."
+                    )
+                else:
+                    explanations.append(
+                        f"VERDICT FALSE: Active fact checkers confirm this statement is inaccurate/false (Fake probability: {conf_pct}%)."
+                    )
             else:
-                explanations.append(
-                    f"VERDICT TRUE: Active fact checkers verify this statement is accurate/true (Fake probability: {conf_pct}%)."
-                )
+                if input_type == "video":
+                    explanations.append(
+                        f"VERDICT TRUE: Active fact checkers verify the spoken statements are accurate/true (Fake probability: {conf_pct}%)."
+                    )
+                else:
+                    explanations.append(
+                        f"VERDICT TRUE: Active fact checkers verify this statement is accurate/true (Fake probability: {conf_pct}%)."
+                    )
         else:
             # Score reasons when no fact-check is found
             if score > 0.65:
-                explanations.append(
-                    f"Text NLP Classifier flags clickbait or sensational writing styles associated with bias ({conf_pct}% fake probability)."
-                )
+                if input_type == "video":
+                    explanations.append(
+                        f"NLP analysis of spoken transcript flags potential linguistic bias or hyperbole ({conf_pct}% fake probability)."
+                    )
+                else:
+                    explanations.append(
+                        f"Text NLP Classifier flags clickbait or sensational writing styles associated with bias ({conf_pct}% fake probability)."
+                    )
             elif score <= 0.40:
-                explanations.append(
-                    f"Text NLP Classifier reports low lexical bias, standard journalistic capitalization, and neutral styling ({conf_pct}% fake probability)."
-                )
+                if input_type == "video":
+                    explanations.append(
+                        f"NLP analysis of spoken transcript indicates neutral statements with standard vocabulary structure ({conf_pct}% fake probability)."
+                    )
+                else:
+                    explanations.append(
+                        f"Text NLP Classifier reports low lexical bias, standard journalistic capitalization, and neutral styling ({conf_pct}% fake probability)."
+                    )
             else:
-                explanations.append(
-                    f"Text NLP Classifier indicates neutral to borderline writing style markers ({conf_pct}% fake probability)."
-                )
+                if input_type == "video":
+                    explanations.append(
+                        f"NLP analysis of spoken transcript indicates normal conversational markers ({conf_pct}% fake probability)."
+                    )
+                else:
+                    explanations.append(
+                        f"Text NLP Classifier indicates neutral to borderline writing style markers ({conf_pct}% fake probability)."
+                    )
 
     # 3. Image Forensics Explanations
     image_results = module_results.get("image_forensics")

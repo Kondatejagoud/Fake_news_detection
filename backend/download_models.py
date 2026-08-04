@@ -40,6 +40,26 @@ def pre_download_models():
     except Exception as e:
         print(f"Warning: Failed to pre-download Sentence Transformers model: {e}")
 
+    # 4. Vosk Speech-to-Text Model (Offline)
+    try:
+        if not os.path.exists(settings.VOSK_MODEL_PATH) or not os.listdir(settings.VOSK_MODEL_PATH):
+            import urllib.request
+            import zipfile
+            zip_url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+            zip_path = "./cache/vosk-model.zip"
+            print(f"Downloading Vosk model from {zip_url}...")
+            urllib.request.urlretrieve(zip_url, zip_path)
+            print("Extracting Vosk model zip...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall("./cache/vosk/")
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+            print("Vosk model downloaded and extracted successfully.")
+        else:
+            print("Vosk model already exists in cache.")
+    except Exception as e:
+        print(f"Warning: Failed to pre-download Vosk model: {e}")
+
     print("Pre-download process completed.")
 
 if __name__ == "__main__":

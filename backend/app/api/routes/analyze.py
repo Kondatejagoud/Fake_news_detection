@@ -17,6 +17,7 @@ from app.extraction.url_scraper import scrape_url
 from app.extraction.ocr import extract_text_from_image
 from app.extraction.video_frames import extract_frames_and_faces
 from app.extraction.metadata import extract_metadata
+from app.extraction.audio_transcriber import extract_audio_to_wav, transcribe_audio_to_text
 
 # Import analysis modules
 from app.analysis.nlp_module import analyze_text
@@ -163,7 +164,7 @@ async def analyze_content(
                 nlp_res = analyze_text(ocr_text)
                 module_results["text_nlp"] = nlp_res
                 modules_run.append("text_nlp")
-                
+        
         elif input_type == "video":
             # Extract frames and crop faces
             frame_data = extract_frames_and_faces(file_path)
@@ -174,8 +175,25 @@ async def analyze_content(
             module_results["deepfake"] = df_res
             modules_run.append("deepfake")
             
-            # Run OCR on video frames (using metadata or sampler)
-            # In real, we can extract text from a few frames, but for simplicity, we run deepfake
+            # Extract and transcribe spoken content (ASR)
+            temp_dir = tempfile.gettempdir()
+            temp_wav_path = os.path.join(temp_dir, f"{uuid.uuid4()}_temp_audio.wav")
+            try:
+                if extract_audio_to_wav(file_path, temp_wav_path):
+                    spoken_text = transcribe_audio_to_text(temp_wav_path)
+                    if spoken_text.strip():
+                        logger.info(f"Video contains spoken content: '{spoken_text[:100]}...'. Running NLP analysis.")
+                        nlp_res = analyze_text(spoken_text)
+                        module_results["text_nlp"] = nlp_res
+                        modules_run.append("text_nlp")
+                    else:
+                        logger.info("Video contains no detectable spoken content.")
+            finally:
+                if os.path.exists(temp_wav_path):
+                    try:
+                        os.remove(temp_wav_path)
+                    except Exception as ex:
+                        logger.warning(f"Failed to delete temp wav file {temp_wav_path}: {ex}")
             
     except Exception as e:
         logger.exception(f"Error during content extraction or analysis: {e}")

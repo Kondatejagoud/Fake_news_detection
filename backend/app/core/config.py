@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     HF_HOME: str = "./cache/huggingface"
     EASYOCR_CACHE: str = "./cache/easyocr"
     TORCH_HOME: str = "./cache/torch"
+    VOSK_MODEL_PATH: str = "./cache/vosk/vosk-model-small-en-us-0.15"
     
     ENABLE_MOCK_FALLBACK: bool = True
     
@@ -45,6 +46,7 @@ settings = Settings()
 os.makedirs(settings.HF_HOME, exist_ok=True)
 os.makedirs(settings.EASYOCR_CACHE, exist_ok=True)
 os.makedirs(settings.TORCH_HOME, exist_ok=True)
+os.makedirs(os.path.dirname(settings.VOSK_MODEL_PATH), exist_ok=True)
 
 # Set environment variables for huggingface and easyocr to use our caches
 os.environ["HF_HOME"] = settings.HF_HOME
