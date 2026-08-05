@@ -276,8 +276,10 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
     text_lower = text.lower()
     for ent_type, names in entity_dict.items():
         for name in names:
-            if name in text_lower:
-                start_idx = text_lower.find(name)
+            pattern = r'\b' + re.escape(name) + r'\b'
+            match = re.search(pattern, text_lower)
+            if match:
+                start_idx = match.start()
                 original_casing = text[start_idx:start_idx + len(name)].strip()
                 if len(original_casing) >= 2:
                     entities[ent_type].add(original_casing)
