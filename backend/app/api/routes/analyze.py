@@ -25,7 +25,7 @@ from app.analysis.image_module import analyze_image
 from app.analysis.deepfake_module import analyze_deepfake
 
 # Import fusion and explanation
-from app.fusion.fusion_engine import fuse_results
+from app.fusion.fusion_engine import fuse_results, compute_final_decision
 from app.explanation.report_generator import generate_report
 
 router = APIRouter()
@@ -213,32 +213,31 @@ async def analyze_content(
         except Exception as e:
             logger.warning(f"Failed to delete temp file {file_path}: {e}")
 
-    # 3. FUSION LAYER
-    text_nlp_score = module_results["text_nlp"]["score"] if module_results["text_nlp"] else None
-    image_forensics_score = module_results["image_forensics"]["score"] if module_results["image_forensics"] else None
-    deepfake_score = module_results["deepfake"]["score"] if module_results["deepfake"] else None
-    
+    # 3. CENTRALIZED FINAL DECISION ENGINE
     reduce_confidence = False
     if module_results["text_nlp"]:
         reduce_confidence = module_results["text_nlp"].get("reduce_confidence", False)
         
-    authenticity_score, confidence_percentage, risk_level = fuse_results(
-        text_nlp_score=text_nlp_score,
-        image_forensics_score=image_forensics_score,
-        deepfake_score=deepfake_score,
+    decision = compute_final_decision(
+        input_type=input_type,
+        module_results=module_results,
         reduce_confidence=reduce_confidence
     )
+    
+    authenticity_score = decision["authenticity_score"]
+    confidence_percentage = decision["confidence_percentage"]
+    risk_level = decision["risk_level"]
+    verdict = decision["verdict"]
+    explanation_list = decision["explanation"]
+    supporting_sources = decision["supporting_sources"]
+    
+    # Store final decision inside module_results JSON column for database persistence
+    module_results["final_decision"] = {
+        "verdict": verdict,
+        "supporting_sources": supporting_sources
+    }
 
-    # 4. EXPLANATION LAYER
-    explanation_list = generate_report(
-        input_type=input_type,
-        authenticity_score=authenticity_score,
-        confidence_percentage=confidence_percentage,
-        risk_level=risk_level,
-        module_results=module_results
-    )
-
-    # 5. DB SAVE
+    # 4. DB SAVE
     try:
         new_analysis = Analysis(
             input_type=input_type,
@@ -267,6 +266,8 @@ async def analyze_content(
             "modules_run": modules_run,
             "module_results": module_results,
             "explanation": explanation_list,
+            "verdict": verdict,
+            "supporting_sources": supporting_sources,
             "created_at": datetime.utcnow().isoformat() + "Z"
         }
 

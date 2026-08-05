@@ -34,4 +34,6 @@ class AnalysisResponse(BaseModel):
     modules_run: List[str] = Field(..., description="Identifiers of modules that processed this request")
     module_results: Dict[str, Any] = Field(..., description="Individual module score outputs")
     explanation: List[str] = Field(..., description="Bullet points justifying the authenticity score")
+    verdict: str = Field(..., description="Unified authenticity verdict mapping to score rules")
+    supporting_sources: List[Dict[str, Any]] = Field(default_factory=list, description="Citations of supporting evidence sources")
     created_at: str = Field(..., description="Timestamp of completion")

@@ -19,20 +19,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
     module_results,
     explanation,
     created_at,
+    verdict,
+    supporting_sources,
   } = data;
 
-  const getVerdictLabel = (score: number) => {
-    if (score >= 95) return "Verified";
-    if (score >= 80) return "Likely True";
-    if (score >= 60) return "Needs Review";
-    if (score >= 40) return "Suspicious";
-    if (score >= 20) return "Likely False";
-    return "False";
-  };
-
-  const getVerdictColorClass = (score: number) => {
-    if (score >= 80) return "text-emerald-400";
-    if (score >= 40) return "text-amber-400";
+  const getVerdictColorClass = (v: string) => {
+    const low = (v || "").toLowerCase();
+    if (low.includes("authentic") || low.includes("true")) return "text-emerald-400";
+    if (low.includes("review") || low.includes("suspicious")) return "text-amber-400";
     return "text-rose-400";
   };
 
@@ -111,14 +105,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
 
   // Task 4, 5, 8: Fact Check Debug Trace
   const debug = (module_results.text_nlp as any)?.factcheck_debug;
-  const verdict = debug?.verdict || "Unverified";
-
 
   const getStatusBadge = () => {
-    const verdictLower = verdict.toLowerCase();
-    if (verdictLower === "verified" || verdictLower === "confirming" || verdictLower === "true" || verdictLower === "likely true") {
+    const verdictLower = (verdict || "Unverified").toLowerCase();
+    if (verdictLower.includes("authentic") || verdictLower.includes("true")) {
       return {
-        label: "VERIFIED TRUE",
+        label: verdict.toUpperCase(),
         badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
         icon: (
           <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -126,9 +118,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
           </svg>
         )
       };
-    } else if (verdictLower === "false" || verdictLower === "refuting" || verdictLower === "likely false") {
+    } else if (verdictLower.includes("manipulated") || verdictLower.includes("false")) {
       return {
-        label: "VERIFIED FALSE",
+        label: verdict.toUpperCase(),
         badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
         icon: (
           <svg className="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -138,7 +130,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
       };
     } else {
       return {
-        label: "UNVERIFIED",
+        label: verdict.toUpperCase(),
         badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
         icon: (
           <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -309,8 +301,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
           </div>
           
           <div className="mt-4 space-y-1">
-            <div className={`text-md font-heading font-extrabold tracking-wide uppercase ${getVerdictColorClass(authenticity_score)}`}>
-              {getVerdictLabel(authenticity_score)}
+            <div className={`text-md font-heading font-extrabold tracking-wide uppercase ${getVerdictColorClass(verdict)}`}>
+              {verdict}
             </div>
             
             <div className="flex gap-4 text-[11px] text-slate-400 pt-2 border-t border-slate-800/80 mt-2">
@@ -905,8 +897,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
               </div>
               <div>
                 <span className="text-slate-500 font-semibold">Verdict:</span>{" "}
-                <span className={`font-bold ${getVerdictColorClass(authenticity_score)}`}>
-                  {getVerdictLabel(authenticity_score)}
+                <span className={`font-bold ${getVerdictColorClass(verdict)}`}>
+                  {verdict}
                 </span>
               </div>
             </div>
@@ -987,6 +979,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
               No trusted evidence available.
             </div>
           )}
+        </div>
+      )}
+
+      {/* Supporting Sources Panel (Step 10) */}
+      {supporting_sources && supporting_sources.length > 0 && (
+        <div className="glass-panel rounded-2xl p-6 border border-slate-800/80 space-y-4">
+          <h4 className="text-[10px] uppercase tracking-widest text-slate-500 font-extrabold">Supporting Sources</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {supporting_sources.map((src: any, idx: number) => (
+              <a 
+                key={idx}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/45 border border-slate-800/60 hover:border-slate-700 hover:bg-slate-900/85 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🔗</span>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-slate-200 group-hover:text-sky-400 transition-colors">
+                      {src.name}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate max-w-[250px]">
+                      {src.url}
+                    </span>
+                  </div>
+                </div>
+                <svg className="w-4 h-4 text-slate-500 group-hover:text-sky-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            ))}
+          </div>
         </div>
       )}
 

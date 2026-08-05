@@ -25,6 +25,8 @@ export interface AnalysisResponse {
     };
   };
   explanation: string[];
+  verdict: string;
+  supporting_sources: Array<{ name: string; url: string }>;
   created_at: string;
 }
 

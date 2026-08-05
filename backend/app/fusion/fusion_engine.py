@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from app.core.logging import logger
 
 # Default reliability weights for each module
@@ -118,3 +118,132 @@ def fuse_results(
     )
 
     return authenticity_score, confidence_percentage, risk_level
+
+def compute_final_decision(
+    input_type: str,
+    module_results: Dict[str, Optional[Dict]],
+    reduce_confidence: bool = False
+) -> Dict[str, Any]:
+    """
+    Centralized Final Decision Engine that combines all active module outputs
+    into a single consistent Final Decision Object.
+    """
+    text_nlp_score = module_results["text_nlp"]["score"] if module_results.get("text_nlp") else None
+    image_forensics_score = module_results["image_forensics"]["score"] if module_results.get("image_forensics") else None
+    deepfake_score = module_results["deepfake"]["score"] if module_results.get("deepfake") else None
+    
+    authenticity_score, confidence_percentage, risk_level = fuse_results(
+        text_nlp_score=text_nlp_score,
+        image_forensics_score=image_forensics_score,
+        deepfake_score=deepfake_score,
+        reduce_confidence=reduce_confidence
+    )
+    
+    # 1. Enforce strict unified mapping rules to prevent contradictions
+    if authenticity_score >= 80:
+        verdict = "Likely Authentic" if input_type in ["image", "video"] else "Likely True"
+        risk_level = "Low"
+    elif authenticity_score >= 65:
+        verdict = "Needs Review"
+        risk_level = "Medium"
+    elif authenticity_score >= 40:
+        verdict = "Suspicious"
+        risk_level = "Medium"
+    else:
+        verdict = "Likely Manipulated" if input_type in ["image", "video"] else "Likely False"
+        risk_level = "High"
+
+    # 2. Collect supporting sources
+    supporting_sources = []
+    text_nlp = module_results.get("text_nlp")
+    confirmations = 0
+    contradictions = 0
+    has_factcheck_match = False
+    
+    if text_nlp and isinstance(text_nlp, dict):
+        debug = text_nlp.get("factcheck_debug", {})
+        if debug and isinstance(debug, dict):
+            evidence_list = debug.get("evidence_list", [])
+            for ev in evidence_list:
+                if isinstance(ev, dict) and ev.get("url"):
+                    supporting_sources.append({
+                        "name": f"{ev.get('source_type', 'Source')}: {ev.get('publisher', 'Publisher')}",
+                        "url": ev.get("url")
+                    })
+            confirmations = len([e for e in evidence_list if isinstance(e, dict) and e.get("verdict") == "Confirming"])
+            contradictions = len([e for e in evidence_list if isinstance(e, dict) and e.get("verdict") == "Refuting"])
+            if debug.get("verdict") and debug.get("verdict") != "Unverified":
+                has_factcheck_match = True
+
+    # 3. Generate clean, non-absolute, non-contradictory explanation list
+    explanations = []
+    
+    # Main summary
+    explanations.append(
+        f"Analyzed input type '{input_type}' with a resulting Authenticity Score of "
+        f"{authenticity_score}/100 ({risk_level} Risk) at a confidence rating of {confidence_percentage}%."
+    )
+    
+    # NLP / Text verification explanation
+    if text_nlp:
+        if has_factcheck_match:
+            if verdict in ["Likely True", "Likely Authentic"]:
+                explanations.append("Trusted evidence suggests this claim is likely accurate.")
+            else:
+                explanations.append("Public fact-checking databases verify that this claim is inaccurate or disputed.")
+        else:
+            if confirmations > 0 and contradictions > 0:
+                explanations.append("Evidence consensus is mixed or conflicting. Manual verification is recommended.")
+            elif confirmations > 0:
+                explanations.append("Trusted evidence suggests this claim is likely accurate.")
+            elif contradictions > 0:
+                explanations.append("Public fact-checking databases verify that this claim is inaccurate or disputed.")
+            else:
+                explanations.append("No reliable public evidence was found.")
+                
+    # Image Forensics explanation
+    image_forensics = module_results.get("image_forensics")
+    if image_forensics and isinstance(image_forensics, dict) and "score" in image_forensics:
+        img_score = image_forensics.get("score", 0.0)
+        manipulated = image_forensics.get("manipulated_regions", 0)
+        if img_score > 0.60:
+            explanations.append(
+                "Image analysis detects high frequency noise deviations, suggesting potential splicing or localization anomalies."
+            )
+            if manipulated > 0:
+                explanations.append(f"Specifically flagged {manipulated} anomalous region(s) using Error Level Analysis (ELA).")
+        else:
+            explanations.append(
+                "Image analysis reports typical double-compression stability without obvious anomalies."
+            )
+
+    # Deepfake detection explanation
+    deepfake = module_results.get("deepfake")
+    if deepfake and isinstance(deepfake, dict) and "score" in deepfake:
+        df_score = deepfake.get("score", 0.0)
+        faces = deepfake.get("faces_detected", 0)
+        if df_score > 0.60:
+            explanations.append(
+                f"Facial analysis flags patterns consistent with synthetic face generation or frame manipulation on {faces} face(s)."
+            )
+        else:
+            explanations.append(
+                f"Facial analysis scanned {faces} face(s) across sampled frames. Face metrics appear natural."
+            )
+            
+    # Add a safe share recommendation
+    if verdict in ["Likely True", "Likely Authentic"]:
+        explanations.append("RECOMMENDATION: Verified claim details match official statements or trusted news.")
+    elif verdict == "Needs Review" or verdict == "Suspicious":
+        explanations.append("UNVERIFIED: Content does not have active third-party fact check matches. Share with caution.")
+    else:
+        explanations.append("WARNING: High risk of digital manipulation or disputed facts. Verify source before sharing.")
+
+    return {
+        "authenticity_score": authenticity_score,
+        "confidence_percentage": confidence_percentage,
+        "risk_level": risk_level,
+        "verdict": verdict,
+        "explanation": explanations,
+        "supporting_sources": supporting_sources
+    }
