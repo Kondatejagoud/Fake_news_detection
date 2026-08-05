@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.db.session import engine, Base
+from app.db.migrations import run_db_migrations
 from app.api.routes import health, analyze
 
 # 1. Initialize logging
@@ -18,6 +19,7 @@ try:
     logger.info("Auto-creating database tables if they do not exist...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified.")
+    run_db_migrations(engine)
 except Exception as e:
     logger.error(f"Error checking/creating database tables: {e}")
 

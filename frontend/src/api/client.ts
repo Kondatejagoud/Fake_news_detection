@@ -28,6 +28,28 @@ export interface AnalysisResponse {
   verdict: string;
   supporting_sources: Array<{ name: string; url: string }>;
   created_at: string;
+  
+  // Centralized Decision Engine Fields
+  recommendation: string;
+  supporting_evidence: Array<{
+    publisher: string;
+    verdict: string;
+    url: string;
+    title: string;
+    snippet: string;
+  }>;
+  contradicting_evidence: Array<{
+    publisher: string;
+    verdict: string;
+    url: string;
+    title: string;
+    snippet: string;
+  }>;
+  confidence: number;
+  evidence_sources: string[];
+  primary_entity: string;
+  named_entities: string[];
+  processing_time: number;
 }
 
 export async function analyzeTextOrUrl(

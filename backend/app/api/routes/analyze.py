@@ -1,6 +1,7 @@
 import os
 import uuid
 import tempfile
+import time
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -35,6 +36,7 @@ async def analyze_content(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    analysis_start = time.time()
     content_type = request.headers.get("content-type", "")
     
     input_type = None
@@ -227,15 +229,9 @@ async def analyze_content(
     authenticity_score = decision["authenticity_score"]
     confidence_percentage = decision["confidence_percentage"]
     risk_level = decision["risk_level"]
-    verdict = decision["verdict"]
-    explanation_list = decision["explanation"]
-    supporting_sources = decision["supporting_sources"]
     
-    # Store final decision inside module_results JSON column for database persistence
-    module_results["final_decision"] = {
-        "verdict": verdict,
-        "supporting_sources": supporting_sources
-    }
+    # Calculate real processing duration
+    processing_time = round(time.time() - analysis_start, 3)
 
     # 4. DB SAVE
     try:
@@ -246,7 +242,8 @@ async def analyze_content(
             confidence_percentage=confidence_percentage,
             risk_level=risk_level,
             module_results=module_results,
-            explanation=explanation_list
+            explanation=decision["explanation"],
+            processing_time=processing_time
         )
         db.add(new_analysis)
         db.commit()
@@ -256,6 +253,13 @@ async def analyze_content(
     except Exception as e:
         logger.error(f"Failed to commit analysis database record: {e}")
         # Return transient response if database commit fails (graceful operation)
+        transient_supporting_sources = []
+        for ev in decision["supporting_evidence"]:
+            transient_supporting_sources.append({
+                "name": f"{ev.get('source_type', 'Source')}: {ev.get('publisher', 'Publisher')}",
+                "url": ev.get("url", "")
+            })
+
         return {
             "analysis_id": str(uuid.uuid4()),
             "input_type": input_type,
@@ -265,9 +269,19 @@ async def analyze_content(
             "risk_level": risk_level,
             "modules_run": modules_run,
             "module_results": module_results,
-            "explanation": explanation_list,
-            "verdict": verdict,
-            "supporting_sources": supporting_sources,
+            "processing_time": processing_time,
+            
+            # Centralized Decision Engine Fields
+            "verdict": decision["verdict"],
+            "recommendation": decision["recommendation"],
+            "explanation": decision["explanation"],
+            "supporting_evidence": decision["supporting_evidence"],
+            "contradicting_evidence": decision["contradicting_evidence"],
+            "confidence": decision["confidence"],
+            "evidence_sources": decision["evidence_sources"],
+            "primary_entity": decision["primary_entity"],
+            "named_entities": decision["named_entities"],
+            "supporting_sources": transient_supporting_sources,
             "created_at": datetime.utcnow().isoformat() + "Z"
         }
 

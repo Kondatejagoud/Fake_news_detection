@@ -33,7 +33,19 @@ class AnalysisResponse(BaseModel):
     risk_level: str = Field(..., description="Risk class: Low, Medium, High")
     modules_run: List[str] = Field(..., description="Identifiers of modules that processed this request")
     module_results: Dict[str, Any] = Field(..., description="Individual module score outputs")
-    explanation: List[str] = Field(..., description="Bullet points justifying the authenticity score")
-    verdict: str = Field(..., description="Unified authenticity verdict mapping to score rules")
+    processing_time: float = Field(0.0, description="Real request execution duration in seconds")
+    
+    # Centralized Final Decision fields
+    verdict: str = Field(..., description="Unified authenticity verdict (TRUE, FALSE, NEEDS REVIEW, UNVERIFIED)")
+    recommendation: str = Field(..., description="Dynamic recommendation based on verdict")
+    explanation: List[str] = Field(..., description="Plain-language bullet points justifying the authenticity score")
+    supporting_evidence: List[Dict[str, Any]] = Field(default_factory=list, description="Supporting evidence publisher items")
+    contradicting_evidence: List[Dict[str, Any]] = Field(default_factory=list, description="Contradicting evidence publisher items")
+    confidence: int = Field(..., description="Dynamic confidence rating matching actual consensus index")
+    evidence_sources: List[str] = Field(default_factory=list, description="List of source publishers that provided data")
+    primary_entity: str = Field(..., description="Primary entity identified")
+    named_entities: List[str] = Field(default_factory=list, description="Formatted list of entities (Name (TYPE))")
+    
+    # Backward compatibility fields
     supporting_sources: List[Dict[str, Any]] = Field(default_factory=list, description="Citations of supporting evidence sources")
     created_at: str = Field(..., description="Timestamp of completion")

@@ -43,18 +43,19 @@ def check_no_contradiction(data: dict):
     risk = data["risk_level"]
     
     # Forbidden rules
-    # 1. Likely Authentic/True must be Low Risk and score >= 80
-    if verdict in ["Likely Authentic", "Likely True"]:
+    if verdict == "TRUE":
         assert risk == "Low", f"Contradiction: Verdict is '{verdict}' but Risk is '{risk}'"
         assert auth >= 80, f"Contradiction: Verdict is '{verdict}' but Authenticity is {auth}%"
         
-    # 2. Needs Review / Suspicious must be Medium Risk and score 40-79
-    if verdict in ["Needs Review", "Suspicious"]:
+    if verdict == "NEEDS REVIEW":
         assert risk == "Medium", f"Contradiction: Verdict is '{verdict}' but Risk is '{risk}'"
-        assert auth >= 40 and auth < 80, f"Contradiction: Verdict is '{verdict}' but Authenticity is {auth}%"
+        assert auth >= 65 and auth < 80, f"Contradiction: Verdict is '{verdict}' but Authenticity is {auth}%"
         
-    # 3. Likely Manipulated/False must be High Risk and score < 40
-    if verdict in ["Likely Manipulated", "Likely False"]:
+    if verdict == "UNVERIFIED":
+        assert risk == "Medium", f"Contradiction: Verdict is '{verdict}' but Risk is '{risk}'"
+        assert auth >= 40 and auth < 65, f"Contradiction: Verdict is '{verdict}' but Authenticity is {auth}%"
+        
+    if verdict == "FALSE":
         assert risk == "High", f"Contradiction: Verdict is '{verdict}' but Risk is '{risk}'"
         assert auth < 40, f"Contradiction: Verdict is '{verdict}' but Authenticity is {auth}%"
 
@@ -67,9 +68,9 @@ def test_claim_modi_resigned(client):
     assert response.status_code == 200
     data = response.json()
     
-    # Expected: Needs Review or Likely False, definitely NOT Likely True
-    assert data["verdict"] in ["Needs Review", "Likely False", "Suspicious"]
-    assert data["verdict"] not in ["Likely True", "Likely Authentic"]
+    # Expected: NEEDS REVIEW, FALSE, or UNVERIFIED, definitely NOT TRUE
+    assert data["verdict"] in ["NEEDS REVIEW", "FALSE", "UNVERIFIED"]
+    assert data["verdict"] != "TRUE"
     check_no_contradiction(data)
 
 def test_claim_isro_chandrayaan3(client):
@@ -81,8 +82,8 @@ def test_claim_isro_chandrayaan3(client):
     assert response.status_code == 200
     data = response.json()
     
-    # Expected: Likely True
-    assert data["verdict"] in ["Likely True", "Likely Authentic"]
+    # Expected: TRUE
+    assert data["verdict"] == "TRUE"
     assert data["authenticity_score"] >= 80
     check_no_contradiction(data)
 
@@ -95,7 +96,7 @@ def test_claim_earth_flat(client):
     assert response.status_code == 200
     data = response.json()
     
-    # Expected: Likely False
-    assert data["verdict"] in ["Likely False", "Likely Manipulated"]
+    # Expected: FALSE
+    assert data["verdict"] == "FALSE"
     assert data["authenticity_score"] < 40
     check_no_contradiction(data)

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, JSON, DateTime
+from sqlalchemy import Column, String, Integer, JSON, DateTime, Float
 from app.db.session import Base
 
 class Analysis(Base):
@@ -17,6 +17,7 @@ class Analysis(Base):
     # Maps to JSONB on PostgreSQL and Text on SQLite automatically
     module_results = Column(JSON, nullable=False)
     explanation = Column(JSON, nullable=False)  # list of strings
+    processing_time = Column(Float, default=0.0, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -30,36 +31,29 @@ class Analysis(Base):
             if self.module_results.get("deepfake") is not None:
                 modules_run.append("deepfake")
 
-        # Extract final decision details if present, otherwise compute dynamically for backward compatibility
-        final_dec = {}
-        if isinstance(self.module_results, dict):
-            final_dec = self.module_results.get("final_decision", {})
+        # Import compute_final_decision inside to_dict to prevent circular imports
+        from app.fusion.fusion_engine import compute_final_decision
         
-        verdict = final_dec.get("verdict")
-        supporting_sources = final_dec.get("supporting_sources", [])
-
-        if not verdict:
-            if self.authenticity_score >= 80:
-                verdict = "Likely Authentic" if self.input_type in ["image", "video"] else "Likely True"
-            elif self.authenticity_score >= 65:
-                verdict = "Needs Review"
-            elif self.authenticity_score >= 40:
-                verdict = "Suspicious"
-            else:
-                verdict = "Likely Manipulated" if self.input_type in ["image", "video"] else "Likely False"
-
-        if not supporting_sources and isinstance(self.module_results, dict):
+        # Determine if we need to reduce confidence
+        reduce_confidence = False
+        if isinstance(self.module_results, dict):
             text_nlp = self.module_results.get("text_nlp")
             if text_nlp and isinstance(text_nlp, dict):
-                debug = text_nlp.get("factcheck_debug", {})
-                if debug and isinstance(debug, dict):
-                    evidence_list = debug.get("evidence_list", [])
-                    for ev in evidence_list:
-                        if isinstance(ev, dict) and ev.get("url"):
-                            supporting_sources.append({
-                                "name": f"{ev.get('source_type', 'Source')}: {ev.get('publisher', 'Publisher')}",
-                                "url": ev.get("url")
-                            })
+                reduce_confidence = text_nlp.get("reduce_confidence", False)
+
+        # Generate the unified Final Decision Object dynamically
+        decision = compute_final_decision(
+            input_type=self.input_type,
+            module_results=self.module_results,
+            reduce_confidence=reduce_confidence
+        )
+
+        supporting_sources = []
+        for ev in decision["supporting_evidence"]:
+            supporting_sources.append({
+                "name": f"{ev.get('source_type', 'Source')}: {ev.get('publisher', 'Publisher')}",
+                "url": ev.get("url", "")
+            })
 
         return {
             "analysis_id": self.id,
@@ -70,8 +64,18 @@ class Analysis(Base):
             "risk_level": self.risk_level,
             "modules_run": modules_run,
             "module_results": self.module_results,
-            "explanation": self.explanation,
-            "verdict": verdict,
+            "processing_time": self.processing_time or 0.0,
+            
+            # Centralized Decision Engine Fields
+            "verdict": decision["verdict"],
+            "recommendation": decision["recommendation"],
+            "explanation": decision["explanation"],
+            "supporting_evidence": decision["supporting_evidence"],
+            "contradicting_evidence": decision["contradicting_evidence"],
+            "confidence": decision["confidence"],
+            "evidence_sources": decision["evidence_sources"],
+            "primary_entity": decision["primary_entity"],
+            "named_entities": decision["named_entities"],
             "supporting_sources": supporting_sources,
             "created_at": self.created_at.isoformat() + "Z"
         }

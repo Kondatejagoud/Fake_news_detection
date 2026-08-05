@@ -202,6 +202,7 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
     
     known_acronyms = {"WHO", "UN", "US", "UK", "EU", "FDA", "CDC", "NASA", "ISRO", "RBI", "ESA", "PIB", "BBC"}
 
+    # 1. Try spaCy NER
     nlp = get_spacy_nlp()
     if nlp:
         try:
@@ -221,7 +222,6 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
                 elif label in ["ORG", "NORP"]:
                     entities["ORGANIZATION"].add(text_val)
                 elif label == "GPE":
-                    # Distinguish country vs location
                     if any(c in text_lower for c in ["india", "united states", "usa", "us", "uk", "united kingdom", "canada", "china", "japan", "germany", "france", "russia", "australia", "italy", "spain", "south africa", "egypt", "mexico"]):
                         entities["COUNTRY"].add(text_val)
                     else:
@@ -236,12 +236,12 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
                     entities["NUMBER"].add(text_val)
                 elif label == "PRODUCT":
                     entities["PRODUCT"].add(text_val)
-            return entities
         except Exception as e:
             logger.error(f"spaCy NER failed: {e}. Falling back to Regex NER.")
 
-    # FALLBACK REGEX NER
-    org_words = re.findall(r'\b[A-Z][a-zA-Z0-9-]*+(?:\s+[A-Z][a-zA-Z0-9-]*+)*\b', text)
+    # 2. Regex extraction (fix possessive quantifier syntax by using * instead of *+)
+    capital_regex = r'\b[A-Z][a-zA-Z0-9-]*(?:\s+[A-Z][a-zA-Z0-9-]*)*\b'
+    org_words = re.findall(capital_regex, text)
     for word in org_words:
         text_lower = word.lower()
         if text_lower in blacklist:
@@ -257,10 +257,62 @@ def extract_named_entities(text: str) -> Dict[str, Set[str]]:
             entities["LOCATION"].add(word)
         elif any(m in text_lower for m in ["chandrayaan", "iphone", "tesla", "spacex", "falcon", "vaccine", "windows", "android", "coffee"]):
             entities["PRODUCT"].add(word)
-        else:
+        elif any(m in text_lower for m in ["narendra", "modi", "trump", "biden", "harris", "putin"]):
             entities["PERSON"].add(word)
+        else:
+            if " " in word:
+                entities["PERSON"].add(word)
+            else:
+                entities["ORGANIZATION"].add(word)
+
+    # 3. Dictionary lookup fallback
+    entity_dict = {
+        "PERSON": ["narendra modi", "modi", "donald trump", "trump", "joe biden", "biden", "kamala harris", "harris", "putin", "vladimir putin", "xi jinping"],
+        "ORGANIZATION": ["isro", "nasa", "who", "un", "united nations", "world health organization", "bbc", "reuters", "ap", "bloomberg", "cdc", "fda", "rbi", "bjp", "congress", "openai"],
+        "LOCATION": ["india", "united states", "usa", "uk", "united kingdom", "canada", "china", "japan", "germany", "france", "russia", "australia", "shriharikota", "london", "washington", "beijing", "delhi", "earth", "moon", "taj mahal", "hyderabad"],
+        "EVENT": ["chandrayaan-3", "chandrayaan 3", "mpox", "covid-19", "covid 19", "5g mind control", "world war", "mpox emergency", "mpox outbreak"]
+    }
+    
+    text_lower = text.lower()
+    for ent_type, names in entity_dict.items():
+        for name in names:
+            if name in text_lower:
+                start_idx = text_lower.find(name)
+                original_casing = text[start_idx:start_idx + len(name)].strip()
+                if len(original_casing) >= 2:
+                    entities[ent_type].add(original_casing)
+
+    # 4. Capitalized-word heuristic fallback
+    words = text.split()
+    for i, w in enumerate(words):
+        cleaned = w.strip(".,!?\"'()[]{}")
+        if cleaned and cleaned[0].isupper() and cleaned.lower() not in blacklist:
+            phrase = cleaned
+            next_idx = i + 1
+            while next_idx < len(words):
+                next_cleaned = words[next_idx].strip(".,!?\"'()[]{}")
+                if next_cleaned and next_cleaned[0].isupper() and next_cleaned.lower() not in blacklist:
+                    phrase += " " + next_cleaned
+                    next_idx += 1
+                else:
+                    break
             
-    dates = re.findall(r'\b(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*+(?:\s+\d{1,2})?,?\s+\d{4}\b|\b\d{4}\b', text)
+            phrase_lower = phrase.lower()
+            if phrase not in known_acronyms and len(phrase) >= 3:
+                if any(m in phrase_lower for m in ["modi", "trump", "biden", "harris", "putin", "jinping"]):
+                    entities["PERSON"].add(phrase)
+                elif any(m in phrase_lower for m in ["delhi", "london", "hyderabad", "washington", "beijing", "earth", "moon", "taj mahal"]):
+                    entities["LOCATION"].add(phrase)
+                elif any(m in phrase_lower for m in ["isro", "nasa", "who", "un", "openai", "bbc", "reuters"]):
+                    entities["ORGANIZATION"].add(phrase)
+                else:
+                    if " " in phrase:
+                        entities["PERSON"].add(phrase)
+                    else:
+                        entities["ORGANIZATION"].add(phrase)
+
+    # Clean up dates & numbers
+    dates = re.findall(r'\b(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{1,2})?,?\s+\d{4}\b|\b\d{4}\b', text)
     for d in dates:
         entities["DATE"].add(d)
         
@@ -1328,25 +1380,28 @@ def analyze_text(text: str) -> dict:
         c_refuting = [v["publisher"] for v in cat_matches.values() if v and v["verdict"] == "Refuting"]
         contradiction_text = f"Conflicting Evidence Detected: {', '.join(c_confirming)} confirms this claim, but {', '.join(c_refuting)} disputes it. Manual verification recommended."
 
-    # Primary publisher entity constraint (Wikipedia cannot be primary entity)
-    primary_entity = "N/A"
-    all_evidence_publishers = []
-    for item in evidence_list_to_ui:
-        all_evidence_publishers.append(item["publisher"])
-        
     all_ents = extract_named_entities(text)
-    
-    if all_evidence_publishers:
-        seen = set()
-        all_evidence_publishers = [x for x in all_evidence_publishers if not (x in seen or seen.add(x))]
+    all_evidence_publishers = []
+
+    # Primary publisher entity constraint (Prioritize extracted PERSON/ORGANIZATION/LOCATION)
+    primary_entity = "Community Source (Wikipedia)"
+    if all_ents.get("PERSON"):
+        primary_entity = list(all_ents["PERSON"])[0]
+    elif all_ents.get("ORGANIZATION"):
+        primary_entity = list(all_ents["ORGANIZATION"])[0]
+    elif all_ents.get("LOCATION"):
+        primary_entity = list(all_ents["LOCATION"])[0]
+    elif all_ents.get("COUNTRY"):
+        primary_entity = list(all_ents["COUNTRY"])[0]
+    elif all_ents.get("PRODUCT"):
+        primary_entity = list(all_ents["PRODUCT"])[0]
+    elif all_ents.get("EVENT"):
+        primary_entity = list(all_ents["EVENT"])[0]
+    elif evidence_list_to_ui:
+        all_evidence_publishers = [item["publisher"] for item in evidence_list_to_ui]
         entity_candidates = [p for p in all_evidence_publishers if p != "Wikipedia"]
         if entity_candidates:
             primary_entity = entity_candidates[0]
-        else:
-            if all_ents.get("ORGANIZATION"):
-                primary_entity = list(all_ents["ORGANIZATION"])[0]
-            else:
-                primary_entity = "Community Source (Wikipedia)"
 
     # Confidence metrics progress bars
     evidence_conf = 90 if len(evidence_list_to_ui) >= 2 else (70 if len(evidence_list_to_ui) == 1 else 15)
@@ -1390,16 +1445,23 @@ def analyze_text(text: str) -> dict:
         if dates_found:
             claim_published_date = min(dates_found)
 
-    # Dynamic Evidence Contribution weights
+    # Dynamic Evidence Contribution weights (based on all attempted/queried modules to avoid "NLP 100%" when searches ran)
     contrib = {
-        "nlp_analysis": round((weights["distilbert"] / total_weight) * 95),
-        "official_sources": round((weights["official_sources"] / total_weight) * 95) if cat_matches["official_sources"] else 0,
-        "google_factcheck": round((weights["google_factcheck"] / total_weight) * 95) if cat_matches["google_factcheck"] else 0,
-        "wikipedia": round((weights["wikipedia"] / total_weight) * 95) if cat_matches["wikipedia"] else 0,
-        "trusted_news": round((weights["trusted_news"] / total_weight) * 95) if cat_matches["trusted_news"] else 0,
+        "nlp_analysis": weights["distilbert"],
     }
-    agreement_factor = 5 if len(confirming_sources) + (1 if google_factcheck_active else 0) >= 2 else 0
-    contrib["cross_source_agreement"] = agreement_factor
+    if google_factcheck_active or cat_matches["google_factcheck"]:
+        contrib["google_factcheck"] = weights["google_factcheck"]
+    if cat_matches["official_sources"] or (google_factcheck_active is False) or len(evidence_list_to_ui) > 0:
+        contrib["official_sources"] = weights["official_sources"]
+    if cat_matches["wikipedia"] or (google_factcheck_active is False) or len(evidence_list_to_ui) > 0:
+        contrib["wikipedia"] = weights["wikipedia"]
+    if cat_matches["trusted_news"] or (google_factcheck_active is False) or len(evidence_list_to_ui) > 0:
+        contrib["trusted_news"] = weights["trusted_news"]
+
+    agreement_factor = 0.05 if len(confirming_sources) + (1 if google_factcheck_active else 0) >= 2 else 0
+    if agreement_factor > 0:
+        contrib["cross_source_agreement"] = agreement_factor
+
     contrib_sum = sum(contrib.values())
     if contrib_sum > 0:
         evidence_contrib_dict = {k: round((v / contrib_sum) * 100) for k, v in contrib.items() if v > 0}
@@ -1506,5 +1568,6 @@ def analyze_text(text: str) -> dict:
         "flagged_claims": flagged_claims,
         "factcheck_debug": factcheck_debug,
         "factcheck_matched": factcheck_matched,
-        "reduce_confidence": False
+        "reduce_confidence": False,
+        "entities_typed": { k: list(v) for k, v in all_ents.items() }
     }

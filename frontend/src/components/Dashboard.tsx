@@ -20,8 +20,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
     explanation,
     created_at,
     verdict,
-    supporting_sources,
+    supporting_evidence = [],
+    contradicting_evidence = [],
+    named_entities = [],
+    processing_time,
+    supporting_sources = [],
   } = data;
+
+  const displayProcessingTime = processingTime !== "0.00" ? processingTime : (processing_time ? processing_time.toFixed(2) : "0.00");
+  const combinedEvidence = [...supporting_evidence, ...contradicting_evidence];
 
   const getVerdictColorClass = (v: string) => {
     const low = (v || "").toLowerCase();
@@ -244,7 +251,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
             </div>
             <div>
               <span className="text-slate-500 block text-[10px] uppercase font-semibold">Processing Time</span>
-              <span className="text-slate-300 font-medium">{processingTime} sec</span>
+              <span className="text-slate-300 font-medium">{displayProcessingTime} sec</span>
             </div>
             <div>
               <span className="text-slate-500 block text-[10px] uppercase font-semibold">Model Version</span>
@@ -515,37 +522,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
             <div>
               <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Detected Named Entities</span>
               <div className="bg-slate-950/20 p-3 rounded-lg border border-slate-900 min-h-[100px] flex flex-wrap gap-1.5 align-content-start">
-                {debug?.explainability_report?.entities && debug.explainability_report.entities.length > 0 ? (
-                  <>
-                    {debug.explainability_report.organizations.map((org: string, idx: number) => (
-                      <span key={`org-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                        🏢 {org}
-                      </span>
-                    ))}
-                    {debug.explainability_report.locations.map((loc: string, idx: number) => (
-                      <span key={`loc-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        📍 {loc}
-                      </span>
-                    ))}
-                    {debug.explainability_report.dates.map((dt: string, idx: number) => (
-                      <span key={`dt-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        📅 {dt}
-                      </span>
-                    ))}
-                    {debug.explainability_report.entities
-                      .filter((e: string) => 
-                        !debug.explainability_report.organizations.includes(e) &&
-                        !debug.explainability_report.locations.includes(e) &&
-                        !debug.explainability_report.dates.includes(e)
-                      )
-                      .slice(0, 10)
-                      .map((p: string, idx: number) => (
-                        <span key={`p-${idx}`} className="text-[9px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                          👤 {p}
-                        </span>
-                      ))
+                {named_entities && named_entities.length > 0 ? (
+                  named_entities.map((item: string, idx: number) => {
+                    const match = item.match(/^(.*)\s+\(([^)]+)\)$/);
+                    const name = match ? match[1] : item;
+                    const type = match ? match[2].toUpperCase() : "PERSON";
+                    
+                    let bgClass = "bg-purple-500/10 text-purple-400 border-purple-500/20";
+                    let icon = "👤";
+                    
+                    if (type === "ORGANIZATION") {
+                      bgClass = "bg-blue-500/10 text-blue-400 border-blue-500/20";
+                      icon = "🏢";
+                    } else if (type === "LOCATION") {
+                      bgClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                      icon = "📍";
+                    } else if (type === "DATE") {
+                      bgClass = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                      icon = "📅";
+                    } else if (type === "EVENT") {
+                      bgClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                      icon = "🏆";
                     }
-                  </>
+                    
+                    return (
+                      <span key={idx} className={`text-[9px] font-bold px-2 py-0.5 rounded border ${bgClass}`}>
+                        {icon} {name}
+                      </span>
+                    );
+                  })
                 ) : (
                   <span className="text-[10px] text-slate-500 italic">No named entities detected in this claim text.</span>
                 )}
@@ -555,22 +560,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
             <div>
               <span className="text-[10px] text-slate-500 uppercase font-bold block mb-2">Why this verdict?</span>
               <div className="space-y-1.5 min-h-[100px]">
-                {debug?.why_verdict && debug.why_verdict.length > 0 ? (
-                  debug.why_verdict.map((item: string, idx: number) => (
-                    <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
-                      <span className={item.startsWith("✓") ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
-                        {item.startsWith("✓") ? "✓" : "🚨"}
-                      </span>
-                      <p className="leading-tight">{item.replace(/^✓\s*/, "").replace(/^🚨\s*/, "")}</p>
-                    </div>
-                  ))
+                {explanation && explanation.length > 0 ? (
+                  explanation.map((item: string, idx: number) => {
+                    const isCheck = item.toLowerCase().includes("likely") || item.toLowerCase().includes("natural") || item.toLowerCase().includes("stability") || item.toLowerCase().includes("neutral") || item.toLowerCase().includes("true") || item.toLowerCase().includes("authentic");
+                    return (
+                      <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
+                        <span className={isCheck ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                          {isCheck ? "✓" : "🚨"}
+                        </span>
+                        <p className="leading-tight">{item}</p>
+                      </div>
+                    );
+                  })
                 ) : (
-                  explanation.map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-1.5 text-[10.5px] text-slate-400">
-                      <span className="text-emerald-400 font-bold">✓</span>
-                      <p className="leading-tight">{item}</p>
-                    </div>
-                  ))
+                  <div className="text-slate-500 italic text-[10.5px]">No explanation data available.</div>
                 )}
               </div>
             </div>
@@ -862,32 +865,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
           )}
 
           {/* Evidence Summary Section (Step 8) */}
+          {/* Evidence Summary Section (Step 8) */}
           <div className="bg-slate-950/45 rounded-xl p-4 border border-slate-800/60 space-y-3 pt-3 mt-3">
             <span className="text-[10px] text-sky-400 uppercase font-extrabold tracking-wider block">Evidence Verification Summary</span>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
-              <div>
-                <span className="text-slate-500 block text-[9px] uppercase font-bold">Google Fact Check</span>
-                <span className={`font-bold ${debug.google_status === "Verified claim found" ? "text-emerald-400" : "text-slate-400"}`}>
-                  {debug.google_status === "Verified claim found" ? (debug.verdict === "True" ? "Confirmed" : "Refuted") : "No Match"}
-                </span>
-              </div>
-              {debug.evidence_list && debug.evidence_list.map((item: any, idx: number) => (
-                <div key={idx}>
+              {supporting_evidence.map((item: any, idx: number) => (
+                <div key={`sup-${idx}`}>
                   <span className="text-slate-500 block text-[9px] uppercase font-bold">{item.publisher}</span>
-                  <span className={`font-bold ${item.verdict === "Confirming" ? "text-emerald-400" : item.verdict === "Refuting" ? "text-rose-400" : "text-slate-400"}`}>
-                    {item.verdict === "Confirming" ? "Confirmed" : item.verdict === "Refuting" ? "Refuted" : "Neutral"}
+                  <span className={`font-bold ${item.verdict === "Confirming" ? "text-emerald-400" : "text-slate-400"}`}>
+                    {item.verdict === "Confirming" ? "Confirmed" : "Neutral"}
                   </span>
                 </div>
               ))}
+              {contradicting_evidence.map((item: any, idx: number) => (
+                <div key={`con-${idx}`}>
+                  <span className="text-slate-500 block text-[9px] uppercase font-bold">{item.publisher}</span>
+                  <span className="font-bold text-rose-400">
+                    Refuted
+                  </span>
+                </div>
+              ))}
+              {supporting_evidence.length === 0 && contradicting_evidence.length === 0 && (
+                <div className="col-span-2 text-slate-500 italic">No public evidence matching this claim was logged.</div>
+              )}
             </div>
             <div className="border-t border-slate-900/60 pt-2 flex flex-wrap gap-x-6 text-[10.5px] font-sans">
               <div>
                 <span className="text-slate-500 font-semibold">Evidence Agreement:</span>{" "}
                 <span className="text-slate-200 font-bold font-mono">
-                  {debug.evidence_list && debug.evidence_list.length > 0 ? (
+                  {supporting_evidence.length + contradicting_evidence.length > 0 ? (
                     `${Math.round(
-                      (debug.evidence_list.filter((e: any) => e.verdict === "Confirming").length /
-                        debug.evidence_list.length) *
+                      (supporting_evidence.filter((e: any) => e.verdict === "Confirming").length /
+                        (supporting_evidence.length + contradicting_evidence.length)) *
                         100
                     )}%`
                   ) : (
@@ -905,23 +914,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
           </div>
 
           {/* Source Evidence Cards list */}
-          {debug.evidence_list && debug.evidence_list.length > 0 ? (
+          {combinedEvidence.length > 0 ? (
             <div className="space-y-3 pt-3 border-t border-slate-900/50">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">Indexed Evidence Cards</span>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {debug.evidence_list.map((item: any, idx: number) => (
+                {combinedEvidence.map((item: any, idx: number) => (
                   <div key={idx} className="bg-slate-950/40 rounded-xl p-4 border border-slate-800/40 space-y-3 text-xs flex flex-col justify-between hover:border-slate-700/60 transition-colors">
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <span className="text-[8.5px] font-extrabold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20 uppercase">
-                          {item.source_type}
+                          {item.source_type || "Source"}
                         </span>
                         <div className="flex gap-1.5 items-center">
                           <span className="text-[8px] font-bold bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/30">
-                            🛡️ {item.reliability_badge}
+                            🛡️ {item.reliability_badge || "N/A"}
                           </span>
                           <span className={`text-[8.5px] font-extrabold px-2 py-0.5 rounded border uppercase ${
-                            item.verdict === "Confirming" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                            item.verdict === "Confirming" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : 
+                            (item.verdict === "Refuting" ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : "bg-slate-800 text-slate-400 border-slate-700")
                           }`}>
                             {item.verdict}
                           </span>
@@ -975,9 +985,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
               </div>
             </div>
           ) : (
-            <div className="text-slate-500 italic text-xs text-center py-4 border border-dashed border-slate-800 rounded-xl">
-              No trusted evidence available.
-            </div>
+            <div className="text-slate-500 italic py-4 text-center border-t border-slate-900/50">No verified evidence logs are linked to this query.</div>
           )}
         </div>
       )}
@@ -1045,7 +1053,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, processingTime = "0.
             </div>
             <div>
               <span className="text-slate-600 block text-[9px] uppercase font-bold">Measured API Roundtrip Latency</span>
-              <span>{processingTime} seconds</span>
+              <span>{displayProcessingTime} seconds</span>
             </div>
             <div>
               <span className="text-slate-600 block text-[9px] uppercase font-bold">DB Persistence Schema</span>
