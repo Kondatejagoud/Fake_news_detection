@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { getAnalysesHistory } from "../api/client";
 import type { AnalysisResponse } from "../api/client";
 import { Dashboard } from "../components/Dashboard";
 
@@ -11,14 +10,15 @@ export const HistoryPage: React.FC = () => {
   // Selected history item to display in the Dashboard view
   const [selectedItem, setSelectedItem] = useState<AnalysisResponse | null>(null);
 
-  const fetchHistory = async () => {
+  const fetchHistory = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getAnalysesHistory();
-      setHistory(data);
+      const existing = localStorage.getItem("hybrid_detector_history");
+      const historyList: AnalysisResponse[] = existing ? JSON.parse(existing) : [];
+      setHistory(historyList);
     } catch (err: any) {
-      setError(err.message || "Failed to load analysis history.");
+      setError("Failed to load local analysis history.");
     } finally {
       setLoading(false);
     }

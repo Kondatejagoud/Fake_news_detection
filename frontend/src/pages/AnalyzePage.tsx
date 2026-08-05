@@ -5,6 +5,19 @@ import { Dashboard } from "../components/Dashboard";
 
 type TabType = "url" | "text" | "image" | "video";
 
+export const saveToLocalHistory = (res: AnalysisResponse) => {
+  try {
+    const existing = localStorage.getItem("hybrid_detector_history");
+    const historyList: AnalysisResponse[] = existing ? JSON.parse(existing) : [];
+    if (!historyList.some((item) => item.analysis_id === res.analysis_id)) {
+      const updated = [res, ...historyList].slice(0, 50);
+      localStorage.setItem("hybrid_detector_history", JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.error("Failed to save to local history:", e);
+  }
+};
+
 export const AnalyzePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>("url");
   const [inputValue, setInputValue] = useState("");
@@ -31,6 +44,7 @@ export const AnalyzePage: React.FC = () => {
           const endTime = performance.now();
           setProcessingDuration(((endTime - startTime) / 1000).toFixed(2));
           setResult(res);
+          saveToLocalHistory(res);
         } catch (err: any) {
           setError(err.message || "Failed to load shared analysis record.");
         } finally {
@@ -66,6 +80,7 @@ export const AnalyzePage: React.FC = () => {
     const startTime = performance.now();
 
     try {
+      let res: AnalysisResponse;
       if (activeTab === "url") {
         if (!inputValue.trim()) throw new Error("Please enter a valid URL.");
         
@@ -73,10 +88,7 @@ export const AnalyzePage: React.FC = () => {
         setTimeout(() => setLoadingStep("Analyzing text patterns & checking claim databases..."), 1500);
         setTimeout(() => setLoadingStep("Fusing module outputs and generating explanation report..."), 3000);
         
-        const res = await analyzeTextOrUrl("url", inputValue);
-        const duration = ((performance.now() - startTime) / 1000).toFixed(2);
-        setProcessingDuration(duration);
-        setResult(res);
+        res = await analyzeTextOrUrl("url", inputValue);
       } 
       else if (activeTab === "text") {
         if (!inputValue.trim()) throw new Error("Please write some text to analyze.");
@@ -85,10 +97,7 @@ export const AnalyzePage: React.FC = () => {
         setTimeout(() => setLoadingStep("Checking database for registered propaganda patterns..."), 1200);
         setTimeout(() => setLoadingStep("Evaluating syntax style and computing risk consensus..."), 2400);
         
-        const res = await analyzeTextOrUrl("text", inputValue);
-        const duration = ((performance.now() - startTime) / 1000).toFixed(2);
-        setProcessingDuration(duration);
-        setResult(res);
+        res = await analyzeTextOrUrl("text", inputValue);
       } 
       else if (activeTab === "image") {
         if (!selectedFile) throw new Error("Please upload an image file.");
@@ -98,10 +107,7 @@ export const AnalyzePage: React.FC = () => {
         setTimeout(() => setLoadingStep("Running neural splicing detector models..."), 3000);
         setTimeout(() => setLoadingStep("Extracting OCR textual contents (if any)..."), 4500);
         
-        const res = await analyzeMediaFile("image", selectedFile);
-        const duration = ((performance.now() - startTime) / 1000).toFixed(2);
-        setProcessingDuration(duration);
-        setResult(res);
+        res = await analyzeMediaFile("image", selectedFile);
       } 
       else if (activeTab === "video") {
         if (!selectedFile) throw new Error("Please upload a video file.");
@@ -112,11 +118,15 @@ export const AnalyzePage: React.FC = () => {
         setTimeout(() => setLoadingStep("Assessing boundary gradients and Laplacian blur ratios..."), 7000);
         setTimeout(() => setLoadingStep("Fusing consensus score..."), 9000);
         
-        const res = await analyzeMediaFile("video", selectedFile);
-        const duration = ((performance.now() - startTime) / 1000).toFixed(2);
-        setProcessingDuration(duration);
-        setResult(res);
+        res = await analyzeMediaFile("video", selectedFile);
+      } else {
+        throw new Error("Invalid tab selection.");
       }
+
+      const duration = ((performance.now() - startTime) / 1000).toFixed(2);
+      setProcessingDuration(duration);
+      setResult(res);
+      saveToLocalHistory(res);
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred during content analysis.");
     } finally {
