@@ -61,8 +61,10 @@ def extract_text_from_image(image_path: str) -> str:
                 return extracted_text.strip()
             else:
                 logger.info("Pytesseract OCR finished, but found no text in image.")
+                return ""
         except Exception as e:
-            logger.error(f"Pytesseract extraction failed: {e}. Falling back to EasyOCR.")
+            logger.error(f"Pytesseract extraction failed: {e}. Bypassing EasyOCR to prevent OOM crash.")
+            return ""
             
     # 2. Fallback to EasyOCR (Heavy, PyTorch-based)
     reader = get_ocr_reader()
