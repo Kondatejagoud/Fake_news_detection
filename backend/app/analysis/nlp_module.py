@@ -1333,7 +1333,7 @@ def analyze_text(text: str) -> dict:
         evidence_summary = "Trusted evidence suggests this claim is likely accurate."
     elif confirmations == 0 and contradictions == 0:
         consensus_label = "Needs Review"
-        nlp_prob = 0.35  # Maps to 65% Authenticity
+        nlp_prob = max(distilbert_prob, 0.35)
         evidence_summary = "No reliable public evidence was found."
     elif contradiction_score > confirmation_score:
         consensus_label = "Likely False"
