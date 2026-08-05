@@ -23,11 +23,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install system dependencies needed by OpenCV and EasyOCR
+# Install system dependencies needed by OpenCV, EasyOCR, and Pytesseract
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     build-essential \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file first to utilize Docker layer caching
