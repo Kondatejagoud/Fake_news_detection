@@ -9,6 +9,10 @@ def get_ocr_reader():
     """
     global _reader
     if _reader is None:
+        if settings.DISABLE_EASYOCR:
+            logger.info("EasyOCR Reader is disabled by configuration settings. Skipping initialization.")
+            _reader = False
+            return _reader
         try:
             import easyocr
             logger.info("Initializing EasyOCR Reader (English, CPU mode)...")

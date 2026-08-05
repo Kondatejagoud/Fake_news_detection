@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     
     ENABLE_MOCK_FALLBACK: bool = True
     DISABLE_SENTENCE_TRANSFORMERS: bool = False
+    DISABLE_EASYOCR: bool = False
     
     # Request limits (to prevent OOM on hobby containers)
     MAX_FILE_SIZE_MB: int = 15  # Limit video uploads to 15MB on free tier
