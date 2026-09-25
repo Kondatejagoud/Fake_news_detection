@@ -46,16 +46,15 @@ def fuse_results(
     text_nlp_score: Optional[float] = None,
     image_forensics_score: Optional[float] = None,
     deepfake_score: Optional[float] = None,
+    text_nlp_dict: Optional[Dict] = None,
     weights: Optional[Dict[str, float]] = None,
     reduce_confidence: bool = False
 ) -> Tuple[int, int, str]:
     """
-    Combines the active analysis module scores to output:
+    Combines active analysis module scores to output:
       1. authenticity_score (0 - 100)
       2. confidence_percentage (0 - 100)
       3. risk_level ('Low', 'Medium', 'High')
-    
-    Scores are expected to be 0.0 - 1.0 fake probability (1.0 = definitely fake).
     """
     if weights is None:
         weights = DEFAULT_WEIGHTS
@@ -69,15 +68,13 @@ def fuse_results(
         active_scores["deepfake"] = max(0.0, min(1.0, deepfake_score))
 
     if not active_scores:
-        # Defaults if no modules ran
         logger.warning("No active modules detected in fusion. Returning default values.")
-        return 50, 50, "Medium"
+        return 50, 25, "Medium"
 
-    # Try running the ML meta-classifier first
+    # Try running ML meta-classifier
     fake_probability = run_meta_classifier(active_scores)
     
     if fake_probability is None:
-        # Fallback to the baseline weighted average
         weighted_sum = sum(active_scores[m] * weights[m] for m in active_scores)
         weight_sum = sum(weights[m] for m in active_scores)
         fake_probability = weighted_sum / weight_sum
@@ -85,32 +82,29 @@ def fuse_results(
     else:
         logger.info(f"Fusion: ML Meta-classifier fake probability computed: {fake_probability:.4f}")
 
-    # Calculate Authenticity Score: 100 is authentic, 0 is fake
     authenticity_score = round((1.0 - fake_probability) * 100)
 
     # Determine Risk Level based on authenticity
-    if authenticity_score >= 70:
+    if authenticity_score >= 80:
         risk_level = "Low"
     elif authenticity_score >= 40:
         risk_level = "Medium"
     else:
         risk_level = "High"
 
-    # Calculate Confidence Percentage
-    # Base confidence goes up with more data sources (modules)
+    # Calculate Confidence Percentage dynamically (No hardcoded 75%)
     num_modules = len(active_scores)
-    if num_modules == 1:
-        base_confidence = 75.0
-    elif num_modules == 2:
-        base_confidence = 88.0
+    if num_modules == 1 and text_nlp_dict and isinstance(text_nlp_dict, dict):
+        debug = text_nlp_dict.get("factcheck_debug", {})
+        confidence_percentage = debug.get("evidence_confidence", 50)
+    elif num_modules == 1:
+        confidence_percentage = 75.0
     else:
-        base_confidence = 96.0
-
-    penalty = calculate_disagreement_penalty(list(active_scores.values()))
-    if reduce_confidence:
-        penalty += 20.0
-        
-    confidence_percentage = max(10, min(100, round(base_confidence - penalty)))
+        base_confidence = 88.0 if num_modules == 2 else 96.0
+        penalty = calculate_disagreement_penalty(list(active_scores.values()))
+        if reduce_confidence:
+            penalty += 20.0
+        confidence_percentage = max(10, min(100, round(base_confidence - penalty)))
     
     logger.info(
         f"Fusion Result - Authenticity: {authenticity_score}, "
@@ -140,32 +134,33 @@ def compute_final_decision(
         text_nlp_score=text_nlp_score,
         image_forensics_score=image_forensics_score,
         deepfake_score=deepfake_score,
+        text_nlp_dict=text_nlp,
         reduce_confidence=reduce_confidence
     )
     
-    # 1. Enforce strict unified mapping rules to prevent contradictions (Patch 5)
+    # 1. Enforce unified decision mapping
     if authenticity_score >= 80:
         verdict = "TRUE"
         risk_level = "Low"
-        recommendation = "Likely authentic."
-    elif authenticity_score >= 65:
+        recommendation = "Likely authentic based on reliable factual evidence."
+    elif authenticity_score >= 65 and authenticity_score < 80:
         verdict = "NEEDS REVIEW"
         risk_level = "Medium"
-        recommendation = "Independent verification recommended."
-    elif authenticity_score >= 40:
+        recommendation = "Conflicting or incomplete evidence. Independent verification recommended."
+    elif authenticity_score >= 40 and authenticity_score < 65:
         verdict = "UNVERIFIED"
         risk_level = "Medium"
-        recommendation = "Insufficient evidence."
+        recommendation = "Insufficient factual evidence available to verify or refute this claim."
     else:
         verdict = "FALSE"
         risk_level = "High"
-        recommendation = "Likely misinformation."
+        recommendation = "Likely misinformation based on public fact-checking evidence."
 
-    # 2. Populate Supporting Evidence and Contradicting Evidence dynamically (Patch 4)
+    # 2. Populate Evidence lists
     supporting_evidence = []
     contradicting_evidence = []
     evidence_sources = []
-    primary_entity = "Community Source (Wikipedia)"
+    primary_entity = "N/A"
     named_entities = []
 
     confirmations = 0

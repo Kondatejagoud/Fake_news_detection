@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, JSON, DateTime, Float
 from app.db.session import Base
 
@@ -19,7 +19,7 @@ class Analysis(Base):
     explanation = Column(JSON, nullable=False)  # list of strings
     processing_time = Column(Float, default=0.0, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     def to_dict(self):
         modules_run = []

@@ -90,13 +90,58 @@ def test_claim_isro_chandrayaan3(client):
 def test_claim_earth_flat(client):
     payload = {
         "input_type": "text",
-        "text": "The Earth is flat"
+        "text": "The Earth is completely flat."
     }
     response = client.post("/api/analyze", json=payload)
     assert response.status_code == 200
     data = response.json()
-    
-    # Expected: FALSE
     assert data["verdict"] == "FALSE"
     assert data["authenticity_score"] < 40
+    check_no_contradiction(data)
+
+def test_claim_earth_orbits_sun(client):
+    payload = {
+        "input_type": "text",
+        "text": "The Earth orbits the Sun."
+    }
+    response = client.post("/api/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] == "TRUE"
+    assert data["authenticity_score"] >= 80
+    check_no_contradiction(data)
+
+def test_claim_water_freezes(client):
+    payload = {
+        "input_type": "text",
+        "text": "Water freezes at 0 degrees Celsius at standard atmospheric pressure."
+    }
+    response = client.post("/api/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] in ["TRUE", "NEEDS REVIEW"]
+    check_no_contradiction(data)
+
+def test_claim_breathe_in_vacuum(client):
+    payload = {
+        "input_type": "text",
+        "text": "Humans can breathe normally in pure vacuum without oxygen."
+    }
+    response = client.post("/api/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] in ["FALSE", "NEEDS REVIEW", "UNVERIFIED"]
+    assert data["verdict"] != "TRUE"
+    check_no_contradiction(data)
+
+def test_claim_obscure_unsupported(client):
+    payload = {
+        "input_type": "text",
+        "text": "Quantum xylophones resonant frequency 8472931057421."
+    }
+    response = client.post("/api/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] == "UNVERIFIED"
+    assert data["confidence_percentage"] <= 40
     check_no_contradiction(data)

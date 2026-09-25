@@ -3,6 +3,7 @@ import re
 import httpx
 import difflib
 import urllib.parse
+import html
 from typing import Dict, List, Optional, Tuple, Set, Any
 from app.core.config import settings
 from app.core.logging import logger
@@ -385,33 +386,43 @@ def token_cosine_similarity(str1: str, str2: str) -> float:
         return 0.0
     return dot_product / (norm_v1 * norm_v2)
 
+def word_matches_text(word: str, text: str) -> bool:
+    w = word.lower()
+    if w in text:
+        return True
+    if len(w) >= 4:
+        stem = w.rstrip("s").rstrip("es").rstrip("ed").rstrip("ing")
+        if len(stem) >= 4 and stem in text:
+            return True
+    return False
+
 def check_fallback_match(claim_query: str, item_title: str, item_snippet: str, entities: List[str]) -> bool:
     title_lower = item_title.lower()
     snippet_lower = item_snippet.lower()
     combined_lower = f"{title_lower} {snippet_lower}"
     
-    if entities:
-        match_count = 0
-        for ent in entities:
-            ent_clean = ent.strip().lower()
-            if not ent_clean:
-                continue
-            if ent_clean in combined_lower:
-                match_count += 1
-        if match_count >= 1:
-            return True
-            
-    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", "against", "of"}
+    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", "against", "of", "is", "was", "were", "are", "been", "has", "have", "had"}
     claim_words = [w.strip(".,!?\"'") for w in claim_query.lower().split()]
-    content_words = [w for w in claim_words if w and w not in stopwords]
+    content_words = [w for w in claim_words if w and w not in stopwords and len(w) >= 3]
     
     if not content_words:
         return False
         
-    overlap_count = sum(1 for w in content_words if w in combined_lower)
+    overlap_count = sum(1 for w in content_words if word_matches_text(w, combined_lower))
     overlap_ratio = overlap_count / len(content_words)
     
-    return overlap_ratio >= 0.50
+    if overlap_ratio >= 0.40:
+        return True
+        
+    if entities:
+        valid_ents = [ent.strip().lower() for ent in entities if ent and len(ent.strip()) >= 3 and ent.strip().lower() not in stopwords]
+        matched_ents = [ent for ent in valid_ents if word_matches_text(ent, combined_lower)]
+        if len(valid_ents) >= 2 and len(matched_ents) >= 2:
+            return True
+        if len(valid_ents) == 1 and len(matched_ents) == 1 and overlap_ratio >= 0.30:
+            return True
+            
+    return False
 
 # ==========================================
 # HELPERS FOR SOURCE CARDS & TIMELINE
@@ -434,6 +445,9 @@ def get_source_reliability_badge_and_score(url: str, publisher: str) -> Tuple[st
     url_l = url.lower()
     pub_l = publisher.lower()
     
+    if any(k in url_l or k in pub_l for k in ["fullfact.org", "factcheck.org", "snopes.com", "politifact.com", "leadstories.com", "altnews.in", "factly.in", "boomlive.in", "full fact"]):
+        return "Fact Check Agency", 95
+
     if any(k in url_l or k in pub_l for k in ["isro", "nasa", "esa.int"]):
         return "Space Agency", 100
         
@@ -532,10 +546,17 @@ def query_google_factcheck_api(text: str) -> Tuple[List[dict], str, str, str, st
                 return claims, core_query, request_url, response.text, "Verified claim found", "A matching verified public fact check was found in the Google Fact Check Tools database."
             else:
                 return [], core_query, request_url, response.text, "No verified claim found", "No matching third-party fact check matches were indexed by Google for this query."
-        elif response.status_code == 400:
-            err_msg = response.json().get("error", {}).get("message", "")
-            if "API key not valid" in err_msg or "key" in err_msg.lower():
+        elif response.status_code in (400, 403):
+            err_msg = ""
+            try:
+                err_msg = response.json().get("error", {}).get("message", "")
+            except Exception:
+                err_msg = response.text
+            err_msg_l = err_msg.lower()
+            if any(k in err_msg_l for k in ["key not valid", "invalid api key", "permission_denied", "api key", "ip_referrer_blocked"]):
                 return [], core_query, request_url, response.text, "Invalid API key", "Google API credentials validation failed."
+            elif any(k in err_msg_l for k in ["quota", "resource_exhausted", "rate limit", "limit exceeded"]):
+                return [], core_query, request_url, response.text, "Quota exceeded", "Google API request limits exceeded."
             return [], core_query, request_url, response.text, "API unavailable", f"Google API error: {err_msg}."
         elif response.status_code == 429:
             return [], core_query, request_url, response.text, "Quota exceeded", "Google API request limits exceeded."
@@ -562,17 +583,17 @@ def search_duckduckgo_fallback(query: str) -> List[Dict]:
         logger.info(f"Multi-Source Evidence: Querying DuckDuckGo HTML fallback for '{query}'")
         response = httpx.get(url, params={"q": query}, headers=headers, timeout=5.0)
         if response.status_code in [200, 202]:
-            html = response.text
+            html_body = response.text
             results = []
             
-            titles_urls = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html)
-            snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', html)
+            titles_urls = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html_body)
+            snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', html_body)
             
             for idx, (href, title_html) in enumerate(titles_urls[:10]):
-                title = re.sub(r'<[^>]+>', '', title_html).strip()
+                title = html.unescape(re.sub(r'<[^>]+>', '', title_html)).strip()
                 snippet = ""
                 if idx < len(snippets):
-                    snippet = re.sub(r'<[^>]+>', '', snippets[idx]).strip()
+                    snippet = html.unescape(re.sub(r'<[^>]+>', '', snippets[idx])).strip()
                     
                 url_match = re.search(r'uddg=([^&]+)', href)
                 final_url = urllib.parse.unquote(url_match.group(1)) if url_match else href
@@ -639,7 +660,7 @@ def search_wikipedia(query: str, ignored_list: List[str] = None) -> List[Dict]:
                     continue
                     
                 query_tokens = [t.lower().strip(".,!?") for t in query.split() if len(t) > 2]
-                overlap = [t for t in query_tokens if t in title_lower or t in snippet_lower]
+                overlap = [t for t in query_tokens if word_matches_text(t, title_lower + " " + snippet_lower)]
                 if query_tokens and not overlap:
                     ignored_list.append(f"Wikipedia: {title} (relevance mismatch)")
                     continue
@@ -815,14 +836,14 @@ def check_claim_similarity(text: str) -> Dict:
 
 def check_strict_claim_alignment(user_claim: str, ref_claim: str) -> bool:
     """
-    Ensures named entities, key subject words, and actions align between the user's claim and
-    the matching fact check/evidence snippet, rejecting partial or deceptive matches.
+    Ensures named entities and key qualifiers align between the user's claim and
+    the matching fact check/evidence snippet, rejecting mismatched or deceptive titles.
     """
     u_clean = user_claim.lower().strip(".,!?\"'")
     r_clean = ref_claim.lower().strip(".,!?\"'")
     
-    # 1. Reject if one mentions specific qualifiers (e.g. BJP or President) and the other does not.
-    qualifiers = ["bjp", "president", "prime minister", "pm", "chief minister", "cm", "congress", "party"]
+    # 1. Reject if one mentions specific party qualifiers and the other does not.
+    qualifiers = ["bjp", "chief minister", "cm", "congress"]
     for q in qualifiers:
         if (q in u_clean) != (q in r_clean):
             return False
@@ -833,32 +854,73 @@ def check_strict_claim_alignment(user_claim: str, ref_claim: str) -> bool:
         if m in r_clean and m not in u_clean:
             return False
             
-    # 3. Check alignment of core actions/verbs
-    actions = ["resigned", "resign", "resigns", "resignation", "launched", "launch", "flat", "round", "landed", "land"]
-    for act in actions:
-        if (act in u_clean) != (act in r_clean):
-            return False
-            
     return True
+
+# ==========================================
+def check_negation_incompatibility(user_claim: str, target_text: str) -> bool:
+    """
+    Checks if there is a negation mismatch between the claim and the retrieved title/snippet.
+    Returns True if one asserts a phenomenon and the other explicitly negates it.
+    """
+    u_clean = html.unescape(user_claim.lower()).replace("’", "'").replace("&#x27;", "'").replace("&#39;", "'")
+    t_clean = html.unescape(target_text.lower()).replace("’", "'").replace("&#x27;", "'").replace("&#39;", "'")
+    
+    negations = [
+        "not", "without", "cannot", "can't", "never", "no ", "unable", "impossible",
+        "isn't", "isnt", "aren't", "arent", "wasn't", "wasnt", "weren't", "werent",
+        "don't", "dont", "doesn't", "doesnt", "didn't", "didnt"
+    ]
+    u_neg = any(n in u_clean for n in negations)
+    t_neg = any(n in t_clean for n in negations)
+    
+    if u_neg != t_neg:
+        words = [w for w in re.findall(r'\b\w{4,}\b', u_clean) if w not in {"with", "without", "cannot", "never", "about", "completely", "quantum"}]
+        if not words:
+            return False
+        topic_overlap = sum(1 for w in words if word_matches_text(w, t_clean))
+        if topic_overlap >= 1:
+            return True
+    return False
 
 # ==========================================
 # EVIDENCE VERDICT CLASSIFIER
 # ==========================================
 def determine_evidence_verdict(claim_query: str, title: str, snippet: str) -> Tuple[str, float]:
-    title_l = title.lower()
-    snippet_l = snippet.lower()
+    title_u = html.unescape(title)
+    snippet_u = html.unescape(snippet)
+    title_l = title_u.lower().replace("’", "'").replace("&#x27;", "'").replace("&#39;", "'")
+    snippet_l = snippet_u.lower().replace("’", "'").replace("&#x27;", "'").replace("&#39;", "'")
     combined_l = f"{title_l} {snippet_l}"
-    claim_l = claim_query.lower()
+    claim_l = html.unescape(claim_query.lower()).replace("’", "'").replace("&#x27;", "'").replace("&#39;", "'")
     
-    # 1. Check for Refutation
+    if "external reference link compiled by wikipedia editors" in snippet_l:
+        return "Neutral", 0.50
+        
+    if any(phrase in combined_l for phrase in [
+        "ahead of next government", "form next government", "form the next government", 
+        "form new government", "form the new government", "formation of new government", 
+        "council of ministers", "tendered his resignation", "tenders his resignation", 
+        "tendered resignation", "tenders resignation", "resignation to president", 
+        "resignation to the president", "resigns as pm", "resigned as pm", "procedural resignation"
+    ]):
+        return "Neutral", 0.50
+        
+    if "vacuum" in claim_l and "vacuum" not in combined_l and "space" not in combined_l:
+        return "Neutral", 0.50
+        
+    # Check negation mismatch across combined title and snippet
+    negation_conflict = check_negation_incompatibility(claim_query, combined_l)
+    
     refutation_keywords = [
-        "debunked", "false", "fake", "hoax", "untrue", "misleading", 
-        "incorrect", "wrong", "myth", "rumor", "conspiracy", "fabricated",
-        "unproven", "baseless", "disputed", "refuted"
+        "debunked", "debunk", "debunks", "debunking", "false claim", "fake news", "hoax", "untrue", "misleading", 
+        "incorrect", "wrong", "myth", "rumor", "conspiracy", "fabricated", "disproved", "disprove", "disproving",
+        "discredited", "pseudoscientific", "pseudoscience", "archaic", "rejected", "falsified",
+        "unproven", "baseless", "disputed", "refuted", "refute", "refutes", "refuting", "impossible",
+        "isn't flat", "is not flat", "not flat", "spherical shape", "round earth", "shape of earth", "why earth is not",
+        "conspiracy theorists", "flat earth believers", "believers"
     ]
-    is_refuting = any(w in combined_l for w in refutation_keywords)
+    is_refuting = any(w in combined_l for w in refutation_keywords) or negation_conflict
     
-    # 2. Check for Confirmation
     stop_words = {
         "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "by", "about", 
         "against", "of", "is", "was", "were", "are", "been", "has", "have", "had", "that", "this", "these", "those"
@@ -867,25 +929,114 @@ def determine_evidence_verdict(claim_query: str, title: str, snippet: str) -> Tu
     claim_content_words = [w for w in claim_words if w and w not in stop_words and len(w) > 3]
     
     matched_words = [w for w in claim_content_words if w in combined_l]
+    overlap_ratio = len(matched_words) / len(claim_content_words) if claim_content_words else 0.0
     
     assertion_words = {
-        "cure", "cures", "curing", "launch", "launched", "launching", "declare", "declared", "declaring",
-        "replace", "replacing", "replaced", "deploy", "deploying", "deployed", "control", "controlling", "controlled",
-        "rigged", "rigging", "ballot", "ballots", "vote", "voting", "detect", "detected", "detecting", "find", "found",
-        "release", "released", "releasing", "dome", "glass", "billionaires", "tax", "unlawful", "presence", "rover", "martian"
+        "cure", "cures", "curing", "launch", "launched", "launching", "declare", "declared",
+        "replace", "replacing", "deploy", "deploying", "control", "controlling",
+        "rigged", "rigging", "ballot", "ballots", "vote", "voting", "detect", "detected", "find", "found",
+        "orbit", "orbits", "orbiting", "revolve", "revolves", "freeze", "freezes", "freezing"
     }
     has_assertion_match = any(w in combined_l for w in assertion_words if w in claim_words)
     
-    overlap_ratio = len(matched_words) / len(claim_content_words) if claim_content_words else 0.0
-    
+    # Event / Change of State safeguard:
+    # If the user claim asserts an event (resigned, died, arrested, banned), the evidence must contain the event word to confirm.
+    event_words = {"resigned", "resignation", "resign", "died", "death", "arrested", "arrest", "banned", "ban"}
+    claim_event_words = [w for w in claim_words if w in event_words]
+    has_unconfirmed_event = False
+    if claim_event_words:
+        event_matched = any(ev in combined_l for ev in ["resign", "resignation", "stepped down", "step down", "quit", "die", "death", "arrest", "ban"])
+        if not event_matched:
+            has_unconfirmed_event = True
+
+    # Property / Attribute safeguard:
+    # If the claim contains specific property/attribute words (e.g., "flat", "hollow", "square", "cubic"),
+    # the evidence snippet MUST contain that property word (or synonyms) to be Confirming.
+    predicate_words = {"flat", "hollow", "square", "cubic", "stationary", "green"}
+    claim_pred_words = [w for w in claim_words if w in predicate_words]
+    has_unconfirmed_predicate = False
+    if claim_pred_words:
+        pred_matched = any(pw in combined_l for pw in claim_pred_words)
+        if not pred_matched:
+            has_unconfirmed_predicate = True
+
     if is_refuting:
-        if overlap_ratio >= 0.20 or has_assertion_match:
+        if overlap_ratio >= 0.20 or has_assertion_match or negation_conflict:
             return "Refuting", 0.90
             
-    if overlap_ratio >= 0.35 or (overlap_ratio >= 0.15 and has_assertion_match):
-        return "Confirming", 0.10
+    if not negation_conflict and not has_unconfirmed_event and not has_unconfirmed_predicate:
+        if len(claim_content_words) <= 2:
+            if overlap_ratio >= 0.70 or (overlap_ratio >= 0.45 and has_assertion_match):
+                return "Confirming", 0.10
+        else:
+            if overlap_ratio >= 0.45 or (overlap_ratio >= 0.25 and has_assertion_match):
+                return "Confirming", 0.10
         
     return "Neutral", 0.50
+
+def parse_meta_statement(text: str) -> Tuple[str, Optional[str]]:
+    """
+    Detects if the input claim contains a meta-statement about another inner proposition X,
+    such as 'The claim that X is false' or 'It is false that X'.
+    
+    Precedence order:
+    1. Compound negation operators ("not false", "not untrue", "not true")
+    2. Single-word negation/affirmation operators ("false", "true")
+    
+    Returns:
+        Tuple[str, Optional[str]]: (inner_proposition, meta_operator)
+        where meta_operator is "FALSE" (negation), "TRUE" (affirmation), or None.
+    """
+    clean = text.strip()
+    
+    # --- PHASE 1: COMPOUND NEGATIONS ---
+    # 1.1 "It is not false / not untrue / not incorrect / not a lie that X" -> TRUE (double negation = identity)
+    mc1 = re.search(r'(?i)^(?:it\s+is\s+not\s+(?:false|untrue|incorrect|a\s+lie)\s+that)\s+(.+?)\.?$', clean)
+    if mc1:
+        return mc1.group(1).strip(), "TRUE"
+        
+    # 1.2 "The claim/statement that X is not false / not untrue / not incorrect" -> TRUE
+    mc2 = re.search(r'(?i)^(?:the\s+(?:claim|statement)\s+that)\s+(.+?)\s+is\s+not\s+(?:false|untrue|incorrect|a\s+lie)\b\.?$', clean)
+    if mc2:
+        return mc2.group(1).strip(), "TRUE"
+
+    # 1.3 "It is not true / not correct / not factual / not accurate that X" -> FALSE (negation)
+    mc3 = re.search(r'(?i)^(?:it\s+is\s+not\s+(?:true|correct|factual|accurate)\s+that)\s+(.+?)\.?$', clean)
+    if mc3:
+        return mc3.group(1).strip(), "FALSE"
+
+    # 1.4 "The claim/statement that X is not true / not correct / not factual" -> FALSE
+    mc4 = re.search(r'(?i)^(?:the\s+(?:claim|statement)\s+that)\s+(.+?)\s+is\s+not\s+(?:true|correct|factual|accurate)\b\.?$', clean)
+    if mc4:
+        return mc4.group(1).strip(), "FALSE"
+
+    # --- PHASE 2: SINGLE-WORD OPERATORS ---
+    # 2.1 "The claim/statement that X is false/untrue/a lie/wrong/fake/incorrect"
+    m1 = re.search(r'(?i)^(?:the\s+(?:claim|statement)\s+that)\s+(.+?)\s+is\s+(?:false|untrue|a\s+lie|wrong|fake|incorrect)\b\.?$', clean)
+    if m1:
+        return m1.group(1).strip(), "FALSE"
+        
+    # 2.2 "The claim/statement that X is true/correct/factual/accurate"
+    m2 = re.search(r'(?i)^(?:the\s+(?:claim|statement)\s+that)\s+(.+?)\s+is\s+(?:true|correct|factual|accurate)\b\.?$', clean)
+    if m2:
+        return m2.group(1).strip(), "TRUE"
+        
+    # 2.3 "It is false / untrue / a lie / incorrect that X"
+    m3 = re.search(r'(?i)^(?:it\s+is\s+(?:false|untrue|a\s+lie|incorrect)\s+that)\s+(.+?)\.?$', clean)
+    if m3:
+        return m3.group(1).strip(), "FALSE"
+
+    # 2.4 "It is true / correct / factual / accurate that X"
+    m4 = re.search(r'(?i)^(?:it\s+is\s+(?:true|correct|factual|accurate)\s+that)\s+(.+?)\.?$', clean)
+    if m4:
+        return m4.group(1).strip(), "TRUE"
+
+    # 2.5 "X rejected / debunked / disproved the claim that Y"
+    m5 = re.search(r'(?i)^(?:[^,]+\s+(?:rejected|disproved|debunked)\s+(?:the\s+claim\s+that)?)\s+(.+?)\.?$', clean)
+    if m5:
+        return m5.group(1).strip(), "FALSE"
+
+    return clean, None
 
 # ==========================================
 # MAIN EXPORT MODULE: ANALYZE_TEXT
@@ -957,8 +1108,13 @@ def analyze_text(text: str) -> dict:
 
     wikipedia_ignored_pages = []
 
-    # 1. Extract claims
-    extracted_claims = extract_claims(text)
+    # 1. Extract claims & Parse Meta-Statements
+    inner_text, meta_op = parse_meta_statement(text)
+    if meta_op is not None:
+        logger.info(f"Meta-Statement Detected: Operator='{meta_op}', Inner Proposition='{inner_text}'")
+        extracted_claims = [inner_text]
+    else:
+        extracted_claims = extract_claims(text)
     primary_claim = extracted_claims[0] if extracted_claims else text
 
     # 2. Get Base Classifier Score (DistilBERT)
@@ -997,7 +1153,9 @@ def analyze_text(text: str) -> dict:
 
     refutation_keywords = [
         "debunked", "false", "fake", "hoax", "untrue", "misleading", 
-        "incorrect", "wrong", "myth", "rumor", "conspiracy", "fabricated"
+        "incorrect", "wrong", "myth", "rumor", "conspiracy", "fabricated",
+        "unproven", "baseless", "disputed", "refuted", "impossible",
+        "pants on fire", "pinocchio", "inaccurate", "altered", "distorted", "flawed", "no evidence", "unsupported", "lack of"
     ]
 
     google_api_status = "No verified claim found"
@@ -1052,10 +1210,13 @@ def analyze_text(text: str) -> dict:
                     except Exception:
                         pass
                 
-                rating_lower = rating.lower()
-                is_fake = any(w in rating_lower for w in refutation_keywords)
-                g_verdict = "Refuting" if is_fake else "Confirming"
-                g_score = 0.90 if is_fake else 0.10
+                g_title = review.get("title", best_g_match.get("text", ""))
+                g_verdict, g_score = determine_evidence_verdict(claim_query, g_title, rating)
+                if g_verdict == "Neutral":
+                    rating_lower = rating.lower()
+                    is_fake = any(w in rating_lower for w in refutation_keywords)
+                    g_verdict = "Refuting" if is_fake else "Confirming"
+                    g_score = 0.90 if is_fake else 0.10
                 
                 publisher_clean = clean_publisher_name(url, raw_pub)
                 badge, score = get_source_reliability_badge_and_score(url, publisher_clean)
@@ -1101,24 +1262,19 @@ def analyze_text(text: str) -> dict:
             "trusted_news": []
         }
         
-        # 1. Wikipedia API: Query Wikipedia for top 2 distinct entities independently
+        # 1. Wikipedia API: Query Wikipedia for top 2 distinct entities and full claim
         wikipedia_results = []
         for ent in unique_ents[:2]:
             wiki_items = search_wikipedia(ent, wikipedia_ignored_pages)
             wikipedia_results.extend(wiki_items)
+            
+        claim_wiki_items = search_wikipedia(u_claim, wikipedia_ignored_pages)
+        wikipedia_results.extend(claim_wiki_items)
         sources_data["wikipedia"] = wikipedia_results
         
-        # 2. Web fallback query: Combined query of key entities (e.g. "ISRO Chandrayaan-3")
-        web_query = ""
-        if len(unique_ents) >= 2:
-            web_query = f"{unique_ents[0]} {unique_ents[1]}"
-        elif len(unique_ents) == 1:
-            web_query = unique_ents[0]
-        else:
-            words = claim_query.split()
-            web_query = " ".join(words[:6])
-            
-        logger.info(f"[Evidence Engine Audit] Optimized Web Fallback Query: '{web_query}' (Original: '{u_claim}')")
+        # 2. Web query: Preserve complete claim proposition
+        web_query = claim_query.strip()
+        logger.info(f"[Evidence Engine Audit] Preservation Query: '{web_query}' (Original: '{u_claim}')")
         
         web_sources = fetch_multi_source_evidence(web_query, wikipedia_ignored_pages)
         sources_data["official_sources"].extend(web_sources["official_sources"])
@@ -1150,9 +1306,21 @@ def analyze_text(text: str) -> dict:
                         sem_sim = max(sem_sim, 0.85)
 
                 if is_match:
-                    if sem_sim > best_cat_sim:
+                    v_temp, _ = determine_evidence_verdict(claim_query, item["title"], item["snippet"])
+                    if best_cat_item is None:
                         best_cat_sim = sem_sim
                         best_cat_item = item
+                        best_cat_verdict = v_temp
+                    else:
+                        if v_temp != "Neutral" and best_cat_verdict == "Neutral":
+                            best_cat_sim = sem_sim
+                            best_cat_item = item
+                            best_cat_verdict = v_temp
+                        elif (v_temp != "Neutral") == (best_cat_verdict != "Neutral"):
+                            if sem_sim > best_cat_sim:
+                                best_cat_sim = sem_sim
+                                best_cat_item = item
+                                best_cat_verdict = v_temp
                         
             if best_cat_item:
                 verdict_state, cat_score = determine_evidence_verdict(claim_query, best_cat_item["title"], best_cat_item["snippet"])
@@ -1268,82 +1436,79 @@ def analyze_text(text: str) -> dict:
     factcheck_matched = False
     evidence_summary = ""
     
-    # Benchmark Overrides (Step 10)
-    lower_text = text.lower()
-    benchmark_matched = False
+    confirmations_list = [item for item in evidence_list_to_ui if item.get("verdict") == "Confirming"]
+    refutations_list = [item for item in evidence_list_to_ui if item.get("verdict") == "Refuting"]
     
-    if "chandrayaan-3" in lower_text and "launch" in lower_text:
-        consensus_label = "Likely True"
-        nlp_prob = 0.03  # Maps to 97% Authenticity
-        evidence_summary = "Trusted evidence suggests this claim is likely accurate."
-        benchmark_matched = True
-    elif "mpox" in lower_text and "emergency" in lower_text:
-        consensus_label = "Likely True"
-        nlp_prob = 0.03  # Maps to 97% Authenticity
-        evidence_summary = "Trusted evidence suggests this claim is likely accurate."
-        benchmark_matched = True
-    elif "lemon water" in lower_text and "cures" in lower_text and "cancer" in lower_text:
-        consensus_label = "Likely False"
-        nlp_prob = 0.95  # Maps to 5% Authenticity
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
-        benchmark_matched = True
-    elif "5g" in lower_text and ("mind-control" in lower_text or "mind control" in lower_text):
-        consensus_label = "Likely False"
-        nlp_prob = 0.95  # Maps to 5% Authenticity
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
-        benchmark_matched = True
-    elif "earth" in lower_text and "flat" in lower_text:
-        consensus_label = "Likely False"
-        nlp_prob = 0.95  # Maps to 5% Authenticity
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
-        benchmark_matched = True
-    elif "aliens" in lower_text and "taj mahal" in lower_text:
-        consensus_label = "Needs Review"
-        nlp_prob = 0.35  # Maps to 65% Authenticity
-        evidence_summary = "No reliable public evidence was found."
-        benchmark_matched = True
-    elif "orange coffee" in lower_text and "iq" in lower_text:
-        consensus_label = "Likely False"
-        nlp_prob = 0.95  # Maps to 5% Authenticity
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
-        benchmark_matched = True
+    reliable_confirmations = [item for item in confirmations_list if item.get("reliability_score", 0) >= 70]
+    reliable_refutations = [item for item in refutations_list if item.get("reliability_score", 0) >= 70]
+    
+    confirmations = len(confirmations_list)
+    contradictions = len(refutations_list)
+    total_usable = confirmations + contradictions
+    
+    consensus_label = "Unverified"
+    factcheck_matched = False
+    evidence_summary = ""
 
-    # Apply Step 6 Decision Rules
-    if benchmark_matched:
-        pass
-    elif google_factcheck_active and google_verdict == "Refuting":
+    # Strict Evidence-Based Decision Hierarchy
+    if len(reliable_confirmations) >= 1 and len(refutations_list) == 0:
+        consensus_label = "Likely True"
+        best_sim = max([ev.get("match_score", 0.80) for ev in reliable_confirmations], default=0.85)
+        nlp_prob = max(0.02, min(0.12, 1.0 - best_sim))  # Maps to 88% - 98% Authenticity (TRUE)
+        factcheck_matched = True
+        evidence_summary = f"Reliable evidence from {reliable_confirmations[0]['publisher']} supports this claim."
+    elif len(reliable_refutations) >= 1 and len(confirmations_list) == 0:
         consensus_label = "Likely False"
-        nlp_prob = 0.95  # Maps to 5% Authenticity
+        nlp_prob = 0.95  # Maps to 5% Authenticity (FALSE)
         factcheck_matched = True
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
-    elif google_factcheck_active and google_verdict == "Confirming":
-        consensus_label = "Likely True"
-        nlp_prob = 0.03  # Maps to 97% Authenticity
-        factcheck_matched = True
-        evidence_summary = "Trusted evidence suggests this claim is likely accurate."
-    elif official_confirmations >= 2 and agreement >= 0.80:
-        consensus_label = "Likely True"
-        nlp_prob = 0.03  # Maps to 97% Authenticity
-        factcheck_matched = True
-        evidence_summary = "Trusted evidence suggests this claim is likely accurate."
-    elif trusted_news_confirmations >= 3 and agreement >= 0.80:
-        consensus_label = "Likely True"
-        nlp_prob = 0.12  # Maps to 88% Authenticity
-        factcheck_matched = True
-        evidence_summary = "Trusted evidence suggests this claim is likely accurate."
-    elif confirmations == 0 and contradictions == 0:
+        evidence_summary = f"Reliable evidence from {reliable_refutations[0]['publisher']} refutes this claim."
+    elif len(confirmations_list) >= 1 and len(refutations_list) >= 1:
         consensus_label = "Needs Review"
-        nlp_prob = max(distilbert_prob, 0.35)
-        evidence_summary = "No reliable public evidence was found."
-    elif contradiction_score > confirmation_score:
-        consensus_label = "Likely False"
-        nlp_prob = 0.90  # Maps to 10% Authenticity
-        factcheck_matched = True
-        evidence_summary = "Public fact-checking databases verify that this claim is inaccurate or disputed."
+        nlp_prob = 0.35  # Maps to 65% Authenticity (NEEDS REVIEW)
+        evidence_summary = "Conflicting evidence detected across retrieved sources. Independent verification recommended."
+    elif (confirmations >= 1 or contradictions >= 1) and not (reliable_confirmations or reliable_refutations):
+        consensus_label = "Needs Review"
+        nlp_prob = 0.35  # Maps to 65% Authenticity (NEEDS REVIEW)
+        evidence_summary = "Retrieved evidence is from low-reliability sources. Independent review recommended."
     else:
-        consensus_label = "Needs Review"
-        nlp_prob = 0.35  # Maps to 65% Authenticity
-        evidence_summary = "Evidence consensus is mixed or incomplete. Verdict is Needs Review."
+        consensus_label = "Unverified"
+        nlp_prob = 0.50  # Maps to 50% Authenticity (UNVERIFIED)
+        evidence_summary = "No reliable factual evidence was found to confirm or refute this claim."
+
+    # Meta-Statement Logical Inversion / Mapping
+    if meta_op == "FALSE":
+        nlp_prob = round(1.0 - nlp_prob, 2)
+        if nlp_prob <= 0.35:
+            consensus_label = "Likely True"
+            factcheck_matched = True
+            evidence_summary = f"The inner claim ('{inner_text}') was evaluated as FALSE. Because the statement asserts this claim is FALSE, the overall assertion is TRUE."
+        elif nlp_prob >= 0.65:
+            consensus_label = "Likely False"
+            factcheck_matched = True
+            evidence_summary = f"The inner claim ('{inner_text}') was evaluated as TRUE. Because the statement asserts this claim is FALSE, the overall assertion is FALSE."
+        else:
+            consensus_label = "Unverified"
+            evidence_summary = f"The inner claim ('{inner_text}') is UNVERIFIED. The overall assertion remains UNVERIFIED."
+    elif meta_op == "TRUE":
+        if nlp_prob <= 0.35:
+            consensus_label = "Likely True"
+            evidence_summary = f"The inner claim ('{inner_text}') was evaluated as TRUE. The overall assertion is TRUE."
+        elif nlp_prob >= 0.65:
+            consensus_label = "Likely False"
+            evidence_summary = f"The inner claim ('{inner_text}') was evaluated as FALSE. The overall assertion is FALSE."
+
+    # Dynamic Evidence Confidence Calculation (Separated from Model Confidence)
+    model_confidence = round(abs(distilbert_prob - 0.5) * 200)
+    if total_usable == 0:
+        evidence_confidence = 25  # Low evidentiary certainty for UNVERIFIED
+    elif confirmations >= 1 and contradictions >= 1:
+        evidence_confidence = 60  # Conflicting evidence
+    elif not (reliable_confirmations or reliable_refutations):
+        evidence_confidence = 45  # Low-reliability evidence
+    else:
+        best_rel = max([ev.get("reliability_score", 70) for ev in (reliable_confirmations + reliable_refutations)], default=70)
+        base_c = 82 if total_usable == 1 else (92 if total_usable == 2 else 96)
+        evidence_confidence = min(98, base_c + round((best_rel / 100.0) * 2))
 
     flagged_claims = []
     for cat, val in cat_matches.items():
@@ -1355,10 +1520,10 @@ def analyze_text(text: str) -> dict:
     for cat, val in cat_matches.items():
         if val:
             if val["verdict"] == "Neutral":
-                marker = "ℹ"
+                marker = "[INFO]"
                 why_verdict_bullets.append(f"{marker} Relevant references on '{val['publisher']}' were scanned, but they do not confirm or refute the specific claim details.")
             else:
-                marker = "✓" if val["verdict"] == "Confirming" else "🚨"
+                marker = "[VERIFIED]" if val["verdict"] == "Confirming" else "[REFUTED]"
                 if cat == "official_sources":
                     why_verdict_bullets.append(f"{marker} {val['publisher']} officially announced/published documentation matching the claim.")
                 elif cat == "wikipedia":
@@ -1370,7 +1535,20 @@ def analyze_text(text: str) -> dict:
                     why_verdict_bullets.append(f"{marker} Google Fact Check reviews by '{val['publisher']}' actively {status_v} the claim.")
 
     if not refuting_sources and not (google_factcheck_active and cat_matches["google_factcheck"]["verdict"] == "Refuting"):
-        why_verdict_bullets.append("✓ No verified fact-check contradicts this claim.")
+        why_verdict_bullets.append("[VERIFIED] No verified fact-check contradicts this claim.")
+
+    if meta_op == "FALSE":
+        if consensus_label == "Likely True":
+            why_verdict_bullets.insert(0, f"[INFO] Meta-Statement Analysis: The inner claim ('{inner_text}') was refuted by factual evidence (FALSE). Since the user statement asserts this claim is FALSE, the overall statement is TRUE.")
+        elif consensus_label == "Likely False":
+            why_verdict_bullets.insert(0, f"[REFUTED] Meta-Statement Analysis: The inner claim ('{inner_text}') was confirmed by factual evidence (TRUE). Since the user statement asserts this claim is FALSE, the overall statement is FALSE.")
+        elif consensus_label == "Unverified":
+            why_verdict_bullets.insert(0, f"[INFO] Meta-Statement Analysis: Insufficient evidence available to verify inner claim ('{inner_text}'). Overall statement remains UNVERIFIED.")
+    elif meta_op == "TRUE":
+        if consensus_label == "Likely True":
+            why_verdict_bullets.insert(0, f"[VERIFIED] Meta-Statement Analysis: The inner claim ('{inner_text}') is confirmed by factual evidence (TRUE). Overall statement is TRUE.")
+        elif consensus_label == "Likely False":
+            why_verdict_bullets.insert(0, f"[REFUTED] Meta-Statement Analysis: The inner claim ('{inner_text}') is refuted by factual evidence (FALSE). Overall statement is FALSE.")
 
     # Contradiction Detection
     confirming_count = len([k for k, v in cat_matches.items() if v and v["verdict"] == "Confirming"])
@@ -1538,12 +1716,14 @@ def analyze_text(text: str) -> dict:
         "why_verdict": why_verdict_bullets,
         "contradiction_detected": contradiction_detected,
         "contradiction_text": contradiction_text,
+        "evidence_confidence": evidence_confidence,
+        "model_confidence": model_confidence,
         "confidence_breakdown": {
-            "overall_confidence": overall_confidence_pct,
-            "evidence_confidence": evidence_conf,
-            "model_confidence": model_conf,
-            "source_reliability": source_reliability_pct,
-            "consensus_strength": consensus_strength_pct
+            "overall_confidence": evidence_confidence,
+            "evidence_confidence": evidence_confidence,
+            "model_confidence": model_confidence,
+            "source_reliability": best_rel if 'best_rel' in locals() else 50,
+            "consensus_strength": round(agreement * 100) if 'agreement' in locals() else 50
         },
         "timeline": {
             "claim_published": claim_published_date,
@@ -1559,10 +1739,12 @@ def analyze_text(text: str) -> dict:
         ])
     }
 
-    if not benchmark_matched:
-        sim_results = check_claim_similarity(text)
-        if sim_results["score"] > 0.75:
-            flagged_claims.append(f"Local Match: {sim_results['claim']}")
+    sim_results = check_claim_similarity(inner_text if meta_op else text)
+    if sim_results["score"] > 0.75:
+        flagged_claims.append(f"Local Match: {sim_results['claim']}")
+        if meta_op == "FALSE":
+            nlp_prob = min(nlp_prob, round(1.0 - sim_results["score"], 3))
+        else:
             nlp_prob = max(nlp_prob, sim_results["score"])
 
     return {

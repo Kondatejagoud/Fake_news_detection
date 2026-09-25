@@ -100,39 +100,40 @@ def extract_frames_and_faces(video_path: str, max_frames: int = 15) -> dict:
     extracted_count = 0
     face_paths = []
 
-    while cap.isOpened() and extracted_count < max_frames:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    try:
+        while cap.isOpened() and extracted_count < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        if frame_count % sample_interval == 0:
-            extracted_count += 1
-            
-            # Detect faces on this sampled frame
-            face_boxes = detect_faces_in_frame(frame)
-            
-            for (x, y, w, h) in face_boxes:
-                # Add padding to face crop for better CNN context
-                height, width, _ = frame.shape
-                pad_x = int(w * 0.15)
-                pad_y = int(h * 0.15)
+            if frame_count % sample_interval == 0:
+                extracted_count += 1
                 
-                x1 = max(0, x - pad_x)
-                y1 = max(0, y - pad_y)
-                x2 = min(width, x + w + pad_x)
-                y2 = min(height, y + h + pad_y)
+                # Detect faces on this sampled frame
+                face_boxes = detect_faces_in_frame(frame)
                 
-                face_crop = frame[y1:y2, x1:x2]
-                
-                if face_crop.size > 0:
-                    face_filename = f"face_{uuid.uuid4()}.jpg"
-                    face_path = os.path.join(face_dir, face_filename)
-                    cv2.imwrite(face_path, face_crop)
-                    face_paths.append(face_path)
+                for (x, y, w, h) in face_boxes:
+                    # Add padding to face crop for better CNN context
+                    height, width, _ = frame.shape
+                    pad_x = int(w * 0.15)
+                    pad_y = int(h * 0.15)
+                    
+                    x1 = max(0, x - pad_x)
+                    y1 = max(0, y - pad_y)
+                    x2 = min(width, x + w + pad_x)
+                    y2 = min(height, y + h + pad_y)
+                    
+                    face_crop = frame[y1:y2, x1:x2]
+                    
+                    if face_crop.size > 0:
+                        face_filename = f"face_{uuid.uuid4()}.jpg"
+                        face_path = os.path.join(face_dir, face_filename)
+                        cv2.imwrite(face_path, face_crop)
+                        face_paths.append(face_path)
 
-        frame_count += 1
-
-    cap.release()
+            frame_count += 1
+    finally:
+        cap.release()
     
     result["frames_extracted"] = extracted_count
     result["faces_detected"] = len(face_paths)

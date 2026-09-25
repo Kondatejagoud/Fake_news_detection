@@ -54,8 +54,8 @@ def extract_text_from_image(image_path: str) -> str:
         try:
             import pytesseract
             from PIL import Image
-            img = Image.open(image_path)
-            extracted_text = pytesseract.image_to_string(img)
+            with Image.open(image_path) as img:
+                extracted_text = pytesseract.image_to_string(img)
             if extracted_text.strip():
                 logger.info(f"Pytesseract OCR extracted text: '{extracted_text[:100]}...' ")
                 return extracted_text.strip()

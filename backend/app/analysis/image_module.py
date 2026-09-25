@@ -90,11 +90,12 @@ def compute_ela(image_path: str, quality: int = 95) -> Tuple[float, int]:
     and analyzes variance. Spliced areas show significantly higher brightness/variance
     because they have different compression histories.
     """
+    temp_ela_path = None
     try:
         # Load original image
         original = Image.open(image_path).convert('RGB')
         
-        # Save transient image at quality quality
+        # Save transient image at specified quality
         temp_dir = tempfile.gettempdir()
         temp_ela_path = os.path.join(temp_dir, f"ela_{uuid.uuid4()}.jpg")
         original.save(temp_ela_path, 'JPEG', quality=quality)
@@ -106,6 +107,9 @@ def compute_ela(image_path: str, quality: int = 95) -> Tuple[float, int]:
         orig_arr = np.array(original, dtype=np.float32)
         comp_arr = np.array(compressed, dtype=np.float32)
         
+        original.close()
+        compressed.close()
+        
         # Compute absolute difference
         diff = np.abs(orig_arr - comp_arr)
         
@@ -114,17 +118,12 @@ def compute_ela(image_path: str, quality: int = 95) -> Tuple[float, int]:
         max_diff = np.max(diff)
         
         # Find pixels with high difference (indicating high modification/splicing)
-        # Threshold: if average color difference is greater than 15.0
         channel_mean_diff = np.mean(diff, axis=2)
         anomalous_pixels = np.sum(channel_mean_diff > 12.0)
         
         # Group anomalous pixels into "regions" (e.g. 500 pixels form a region)
         manipulated_regions = int(anomalous_pixels // 500)
         
-        # Clean up temp file
-        if os.path.exists(temp_ela_path):
-            os.remove(temp_ela_path)
-            
         logger.info(
             f"ELA: Mean Difference: {mean_diff:.4f}, Max Diff: {max_diff}, "
             f"Anomalous Pixels: {anomalous_pixels} ({manipulated_regions} regions)"
@@ -134,6 +133,12 @@ def compute_ela(image_path: str, quality: int = 95) -> Tuple[float, int]:
     except Exception as e:
         logger.error(f"Error computing ELA for {image_path}: {e}")
         return 0.0, 0
+    finally:
+        if temp_ela_path and os.path.exists(temp_ela_path):
+            try:
+                os.remove(temp_ela_path)
+            except Exception as ex:
+                logger.warning(f"Could not remove temp ELA file {temp_ela_path}: {ex}")
 
 def analyze_image(image_path: str) -> dict:
     """

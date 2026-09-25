@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -282,7 +282,7 @@ async def analyze_content(
             "primary_entity": decision["primary_entity"],
             "named_entities": decision["named_entities"],
             "supporting_sources": transient_supporting_sources,
-            "created_at": datetime.utcnow().isoformat() + "Z"
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
 @router.get("/analyses", response_model=List[AnalysisResponse])
